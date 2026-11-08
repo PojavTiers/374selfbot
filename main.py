@@ -115,7 +115,7 @@ class SafeSelfBot(discord.Client):
         if message.author.bot:
             return
 
-        # Save other people's messages for the -mock command (but don't reply to them)
+        # Save other people's messages for the -mock command
         if message.author.id != self.user.id:
             channel_key = str(message.channel.id)
             user_key = str(message.author.id)
@@ -123,14 +123,13 @@ class SafeSelfBot(discord.Client):
                 self.last_messages[channel_key] = {}
             self.last_messages[channel_key][user_key] = message.content
             
-            # Auto-react logic for other people
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
                     try:
                         await message.add_reaction(emoji)
                     except Exception:
                         pass
-            return # Stop here if it's not you
+            return 
 
         # --- COMMAND HANDLING FOR YOU ONLY ---
         prefix = self.config.get('prefix', '-')
@@ -152,10 +151,14 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
+            # --- THE FIX: Replaced embeds with plain text in code blocks ---
             if cmd == 'help':
-                embed = discord.Embed(title="Selfbot Commands", color=0x7289da)
-                embed.add_field(name="Utility", value=f"```{prefix}help\n{prefix}setprefix <char>\n{prefix}say <text>\n{prefix}ping```", inline=False)
-                await message.channel.send(embed=embed)
+                help_text = (
+                    "**Selfbot Commands**\n"
+                    f"```\n{prefix}help\n{prefix}setprefix <char>\n{prefix}say <text>\n"
+                    f"{prefix}ping\n{prefix}react <@user> <emoji>\n{prefix}mock <@user>\n```"
+                )
+                await message.channel.send(help_text)
 
             elif cmd == 'setprefix':
                 if rest_args:
