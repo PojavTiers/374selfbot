@@ -27,8 +27,8 @@ class SafeSelfBot(discord.Client):
         self.user_id = None
         self.auto_reacts = {}
         self.auto_mocks = {} 
-        self.cached_users = {} # NEW: Global user cache
-        self.active_channels = set() # NEW: Tracks channels to refresh
+        self.cached_users = {} 
+        self.active_channels = set() 
         self.cache_task = None
 
     def load_config(self):
@@ -51,27 +51,24 @@ class SafeSelfBot(discord.Client):
         except Exception:
             pass
         
-        # Start the background cache refresher
         if self.cache_task is None or self.cache_task.done():
             self.cache_task = asyncio.create_task(self.background_cache_refresher())
 
-    # --- BACKGROUND CACHE REFRESHER ---
     async def background_cache_refresher(self):
         while True:
             try:
                 for channel in list(self.active_channels):
                     try:
-                        # Fetch last 20 messages to keep cache updated without rate limits
                         async for msg in channel.history(limit=20):
                             if not msg.author.bot:
                                 self.cached_users[msg.author.id] = msg.author
                     except Exception:
-                        pass # Ignore if we lost access to the channel
+                        pass 
             except asyncio.CancelledError:
                 break
             except Exception:
                 pass
-            await asyncio.sleep(3) # Refresh every 3 seconds
+            await asyncio.sleep(3) 
 
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
@@ -86,7 +83,6 @@ class SafeSelfBot(discord.Client):
         return text
 
     async def get_cached_user(self, message, arg):
-        # Helper to grab users without triggering 403 errors
         target_id = None
         if arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
@@ -96,18 +92,15 @@ class SafeSelfBot(discord.Client):
         if not target_id:
             return None
             
-        # 1. Check global cache
         if target_id in self.cached_users:
             return self.cached_users[target_id]
             
-        # 2. Check guild cache
         if message.guild:
             member = message.guild.get_member(target_id)
             if member:
                 self.cached_users[target_id] = member
                 return member
 
-        # 3. Try to fetch via API (might fail, but worth a shot)
         try:
             user = await self.fetch_user(target_id)
             self.cached_users[target_id] = user
@@ -115,18 +108,72 @@ class SafeSelfBot(discord.Client):
         except Exception:
             return None
 
+    # --- HELP PAGINATION GENERATOR ---
+    def generate_help(self, category=None, page=1):
+        prefix = self.config.get('prefix', '-')
+        
+        if category is None:
+            return (
+                "```ini\n"
+                "374 SelfBot Prefix: -\n\n"
+                f"[ UTILITY ] - Utility commands {prefix}ping, {prefix}avatar, {prefix}setprefix\n"
+                f"[ MODERATION ] - Moderation commands {prefix}purge, {prefix}dm\n"
+                f"[ FUN ] - Fun commands {prefix}mock, {prefix}react, {prefix}stop\n"
+                f"[ INFO ] - Info commands {prefix}userinfo, {prefix}serverinfo\n"
+                f"[ RPC ] - Rich presence commands {prefix}rpc\n\n"
+                f"Type {prefix}help <category> to see all commands. (e.g. {prefix}help utility)\n"
+                "```"
+            )
+        
+        # Detailed Categories
+        categories = {
+            "utility": [
+                [f"{prefix}ping", f"{prefix}setprefix <char>", f"{prefix}avatar <@user>"],
+                [f"{prefix}banner <@user>", f"More utilities coming soon..."]
+            ],
+            "moderation": [
+                [f"{prefix}purge <1-100>", f"{prefix}dm <@user> <msg>"]
+            ],
+            "fun": [
+                [f"{prefix}mock <@user>", f"{prefix}react <@user> <emoji>", f"{prefix}stop"]
+            ],
+            "info": [
+                [f"{prefix}userinfo <@user>", f"{prefix}serverinfo"]
+            ],
+            "rpc": [
+                [f"{prefix}rpc <playing/watching/listening> <text>"]
+            ]
+        }
+
+        cat_lower = category.lower()
+        if cat_lower not in categories:
+            return f"```\nInvalid category. Available: utility, moderation, fun, info, rpc\n```"
+
+        pages = categories[cat_lower]
+        total_pages = len(pages)
+        
+        if page < 1 or page > total_pages:
+            page = 1
+
+        cmd_list = "\n".join([f"- {cmd}" for cmd in pages[page - 1]])
+        
+        return (
+            "```ini\n"
+            f"374 SelfBot | {cat_lower.capitalize()} Commands\n"
+            f"Page {page} of {total_pages}\n\n"
+            f"{cmd_list}\n"
+            "```"
+        )
+
     async def on_message(self, message):
         if message.author.bot:
             return
             
-        # Add channel to active list for background refresher
         if message.guild:
             self.active_channels.add(message.channel)
 
-        # Cache this author instantly
         self.cached_users[message.author.id] = message.author
 
-        # --- LISTEN FOR TARGETS ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -142,7 +189,6 @@ class SafeSelfBot(discord.Client):
             
             return 
 
-        # --- COMMAND HANDLING ---
         prefix = self.config.get('prefix', '-')
         if not message.content.startswith(prefix):
             return
@@ -152,24 +198,25 @@ class SafeSelfBot(discord.Client):
         rest_args = args[1:]
 
         try:
-            # --- HELP MENU ---
+            # --- NEW HELP SYSTEM ---
             if cmd == 'help':
-                help_text = (
-                    "```ini\n"
-                    "374 SelfBot | Advanced Platform\n"
-                    f"Prefix: {prefix}\n\n"
-                    "[ UTILITY ]\n"
-                    f"{prefix}ping, {prefix}setprefix, {prefix}avatar, {prefix}banner\n\n"
-                    "[ MODERATION ]\n"
-                    f"{prefix}purge, {prefix}dm\n\n"
-                    "[ FUN ]\n"
-                    f"{prefix}react, {prefix}mock, {prefix}stop\n\n"
-                    "[ INFO ]\n"
-                    f"{prefix}userinfo, {prefix}serverinfo\n\n"
-                    "[ RPC ]\n"
-                    f"{prefix}rpc <playing/watching/listening> <text>\n"
-                    "```"
-                )
+                # 1. Delete the command you just typed
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+                # 2. Parse category and page
+                category = None
+                page = 1
+                
+                if len(rest_args) >= 1:
+                    category = rest_args[0].lower()
+                if len(rest_args) >= 2 and rest_args[1].isdigit():
+                    page = int(rest_args[1])
+
+                # 3. Generate and send the new help menu
+                help_text = self.generate_help(category, page)
                 await message.channel.send(help_text)
 
             # --- UTILITY ---
@@ -182,7 +229,6 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
-            # --- AVATAR (NEW FORMAT & CACHE FIX) ---
             elif cmd == 'avatar':
                 target = None
                 if message.reference and message.reference.resolved:
@@ -202,12 +248,10 @@ class SafeSelfBot(discord.Client):
                         if resp.status == 200:
                             img_data = await resp.read()
                             file = discord.File(io.BytesIO(img_data), filename="avatar.png")
-                            # Fixed Output Format exactly as requested
                             await message.channel.send(f"> **{target.name}’s Avatar**", file=file)
                         else:
                             await message.channel.send("```Failed to download avatar.```")
 
-            # --- BANNER (NEW FORMAT & CACHE FIX) ---
             elif cmd == 'banner':
                 target = None
                 if message.reference and message.reference.resolved:
@@ -267,7 +311,7 @@ class SafeSelfBot(discord.Client):
                 except Exception:
                     await message.channel.send("```Failed to send DM (User has DMs closed).```")
 
-            # --- FUN & INTERACTIONS (MOCK FIX) ---
+            # --- FUN & INTERACTIONS ---
             elif cmd == 'mock':
                 if not rest_args:
                     await message.channel.send("```Usage: -mock <@user>```")
