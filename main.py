@@ -114,9 +114,7 @@ class SafeSelfBot(discord.Client):
                 return None
         return None
 
-    # --- SWAPPED TO A RELIABLE API (Nekos.best) ---
     async def get_anime_gif(self, category):
-        # Map commands to Nekos.best endpoints
         endpoint_map = {
             'hug': 'hug',
             'slap': 'slap',
@@ -279,6 +277,7 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
+        # --- AUTO MOCK & REACT FOR TARGETS ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -298,17 +297,21 @@ class SafeSelfBot(discord.Client):
         if not message.content.startswith(prefix):
             return
 
+        # --- THE FIX: Delete the command message safely ---
+        try:
+            # Wait 0.5s so the bot 100% reads the command before deleting it
+            asyncio.create_task(self.delete_command_later(message))
+        except Exception:
+            pass
+
         args = message.content[len(prefix):].strip().split()
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
         try:
             if cmd == 'help':
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
-                    
+                # Help already deletes its own message via its own logic
+                
                 if self.help_message_id:
                     try:
                         old_msg = await message.channel.fetch_message(self.help_message_id)
@@ -577,6 +580,7 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"> **Mass DM finished. Sent to** `{sent}` **users.**")
 
             elif cmd == 'ghostping':
+                # Ghostping handles its own deletion
                 try:
                     await message.delete()
                 except Exception:
@@ -726,19 +730,19 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send("> **Could not find user.**")
                     return
                 
+                output_msg = f"> {message.author.mention} `{cmd}s` {target.mention}"
+                
                 gif_url = await self.get_anime_gif(cmd)
                 if gif_url:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(gif_url) as resp:
                             if resp.status == 200:
                                 file = discord.File(io.BytesIO(await resp.read()), filename="action.gif")
-                                await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**", file=file)
+                                await message.channel.send(output_msg, file=file)
                             else:
-                                # Fallback if image download fails
-                                await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**")
+                                await message.channel.send(output_msg)
                 else:
-                    # Fallback if API fails completely
-                    await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**")
+                    await message.channel.send(output_msg)
 
             elif cmd == 'ship':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
@@ -850,6 +854,14 @@ class SafeSelfBot(discord.Client):
 
         except Exception as e:
             await message.channel.send(f"> **Error:** `{str(e)}`")
+
+    async def delete_command_later(self, message):
+        # Wait a fraction of a second for the bot to register the command
+        await asyncio.sleep(0.5)
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
