@@ -1,5 +1,4 @@
 import discord
-from discord.ext import commands
 import aiohttp
 import json
 import os
@@ -30,10 +29,7 @@ def external_asset(url: str) -> str:
     accounts render it. Format: mp:external/<hash>/https/<url-encoded>
     The hash is arbitrary but stable; Discord's client just proxies the URL.
     """
-    # Discord expects: mp:external/<md5-ish hash>/https/<url path>
-    # The hash segment isn't validated strictly; using a stable md5 keeps it consistent.
     h = hashlib.md5(url.encode()).hexdigest()
-    # Strip the scheme so we can prefix https/
     if url.startswith("https://"):
         rest = url[len("https://"):]
     elif url.startswith("http://"):
@@ -45,9 +41,8 @@ def external_asset(url: str) -> str:
 
 class SafeSelfBot(discord.Client):
     def __init__(self, token_index=0):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(intents=intents)
+        # THE FIX: self_bot=True tells the library to accept user tokens
+        super().__init__(self_bot=True)
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
@@ -92,12 +87,6 @@ class SafeSelfBot(discord.Client):
 
     # --- RPC HELPERS ---
     def build_activity(self, rpc_entry):
-        """
-        Build a discord.Activity that renders images on USER accounts.
-        For user accounts, the reliable path is:
-          - type=playing/listening/watching
-          - assets={'large_image': <raw or mp:external url>, 'large_text': ...}
-        """
         rtype = rpc_entry['type']
         text = rpc_entry['text']
         image = rpc_entry.get('image')
@@ -105,8 +94,6 @@ class SafeSelfBot(discord.Client):
 
         assets = {}
         if image:
-            # Pass raw URL; discord.py sends it in assets.large_image.
-            # Discord's client proxies external URLs for user accounts.
             assets['large_image'] = image
             assets['large_text'] = text
         if small:
@@ -131,7 +118,6 @@ class SafeSelfBot(discord.Client):
                 assets=assets,
             )
         elif rtype == 'streaming':
-            # Streaming never renders assets; just the Live button.
             return discord.Streaming(name=text, url="https://twitch.tv/yourusername")
         return None
 
@@ -301,7 +287,6 @@ class SafeSelfBot(discord.Client):
             image = None
             small_image = None
 
-            # Pull trailing image args (up to 2): could be [large] or [large small]
             def is_img_token(tok):
                 tl = tok.lower()
                 return tl == 'none' or tl.startswith('http://') or tl.startswith('https://')
