@@ -108,7 +108,7 @@ class SafeSelfBot(discord.Client):
                 "```ini\n"
                 f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setprefix\n"
                 f"[ MODERATION ] - {prefix}purge, {prefix}dm\n"
-                f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}stop\n"
+                f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}stopmock, {prefix}stopreact, {prefix}stop\n"
                 f"[ INFO ] - {prefix}userinfo, {prefix}serverinfo\n"
                 f"[ RPC ] - {prefix}rpc\n"
                 "```"
@@ -130,6 +130,8 @@ class SafeSelfBot(discord.Client):
             "fun": [
                 {"cmd": f"{prefix}mock <@user>", "desc": "Repeat their messages"},
                 {"cmd": f"{prefix}react <@user> <emoji>", "desc": "Auto-react to a user"},
+                {"cmd": f"{prefix}stopmock", "desc": "Stop mocking a user"},
+                {"cmd": f"{prefix}stopreact", "desc": "Stop auto-reacting to a user"},
                 {"cmd": f"{prefix}stop", "desc": "Stop all mocks and reacts"}
             ],
             "info": [
@@ -336,7 +338,6 @@ class SafeSelfBot(discord.Client):
                     return
                 
                 self.auto_mocks[str(target.id)] = True
-                # FIXED OUTPUT HERE
                 await message.channel.send(f"> **Mocking {target.name}**")
 
             elif cmd == 'react':
@@ -357,6 +358,20 @@ class SafeSelfBot(discord.Client):
                 
                 self.auto_reacts[str(target.id)] = [emoji]
                 await message.channel.send(f"> **Reacting to {target.name} with {emoji}**")
+
+            elif cmd == 'stopmock':
+                if self.auto_mocks:
+                    self.auto_mocks.clear()
+                    await message.channel.send("> **Stopped mocking all users.**")
+                else:
+                    await message.channel.send("> **No users are currently being mocked.**")
+
+            elif cmd == 'stopreact':
+                if self.auto_reacts:
+                    self.auto_reacts.clear()
+                    await message.channel.send("> **Stopped auto-reacting to all users.**")
+                else:
+                    await message.channel.send("> **No auto-reacts are currently active.**")
 
             elif cmd == 'stop':
                 self.auto_reacts.clear()
