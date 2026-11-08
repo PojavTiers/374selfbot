@@ -20,7 +20,6 @@ print(f"Found {len(TOKENS)} token(s). Starting clients...")
 
 class SafeSelfBot(discord.Client):
     def __init__(self, token_index=0):
-        # THE FIX: Completely removed Intents. Selfbots don't use them.
         super().__init__(self_bot=True)
         self.token_index = token_index
         self.config = self.load_config()
@@ -116,10 +115,12 @@ class SafeSelfBot(discord.Client):
             self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
 
     async def on_message(self, message):
-        print(f"Message received: {message.content} from {message.author}")
-
+        # Skip if the message is from ourselves
         if message.author == self.user:
             return
+
+        # DEBUG PRINT
+        print(f"RAW MESSAGE: {message.content}")
 
         channel_key = str(message.channel.id)
         user_key = str(message.author.id)
@@ -127,22 +128,21 @@ class SafeSelfBot(discord.Client):
             self.last_messages[channel_key] = {}
         self.last_messages[channel_key][user_key] = message.content
 
-        for uid_str, emojis in self.auto_reacts.items():
-            if str(message.author.id) == uid_str and emojis:
-                try:
-                    for emoji in emojis:
-                        await message.add_reaction(emoji)
-                except Exception:
-                    pass
+        # Get the prefix
+        prefix = self.config.get('prefix', '-')
 
-        if not message.content.startswith(self.config['prefix']):
+        # Check if the message starts with the prefix
+        if not message.content.startswith(prefix):
             return
 
-        args = message.content[len(self.config['prefix']):].strip().split()
+        # DEBUG PRINT
+        print(f"PREFIX MATCH! Command: {message.content}")
+
+        args = message.content[len(prefix):].strip().split()
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
-        print(f"Command detected: {cmd}")
+        print(f"EXECUTING: {cmd}")
 
         async def get_user_from_arg(arg):
             if arg.startswith('<@') and arg.endswith('>'):
@@ -155,7 +155,7 @@ class SafeSelfBot(discord.Client):
         try:
             if cmd == 'help':
                 embed = discord.Embed(title="Selfbot Commands", color=0x7289da)
-                embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
+                embed.add_field(name="Utility", value=f"```{prefix}help\n{prefix}setprefix <char>\n{prefix}say <text>\n{prefix}ping```", inline=False)
                 await message.channel.send(embed=embed)
 
             elif cmd == 'setprefix':
