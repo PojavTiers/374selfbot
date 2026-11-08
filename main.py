@@ -28,8 +28,6 @@ class SafeSelfBot(discord.Client):
         self.auto_reacts = {}
         self.auto_mocks = {} 
         self.cached_users = {} 
-        self.active_channels = set() 
-        self.cache_task = None
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -50,25 +48,16 @@ class SafeSelfBot(discord.Client):
             await self.change_presence(activity=None)
         except Exception:
             pass
-        
-        if self.cache_task is None or self.cache_task.done():
-            self.cache_task = asyncio.create_task(self.background_cache_refresher())
 
-    async def background_cache_refresher(self):
-        while True:
-            try:
-                for channel in list(self.active_channels):
-                    try:
-                        async for msg in channel.history(limit=20):
-                            if not msg.author.bot:
-                                self.cached_users[msg.author.id] = msg.author
-                    except Exception:
-                        pass 
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                pass
-            await asyncio.sleep(3) 
+    # --- INSTANT CACHE UPDATERS ---
+    async def on_member_join(self, member):
+        self.cached_users[member.id] = member
+
+    async def on_member_update(self, before, after):
+        self.cached_users[after.id] = after
+
+    async def on_user_update(self, before, after):
+        self.cached_users[after.id] = after
 
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
@@ -82,33 +71,40 @@ class SafeSelfBot(discord.Client):
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
         return text
 
-    async def get_cached_user(self, message, arg):
+    # --- SMART USER RESOLVER (NO API 403 ERRORS) ---
+    async def resolve_user(self, message, arg):
+        # 1. If you pinged someone, grab them directly from the message mentions
+        if message.mentions:
+            return message.mentions[0]
+            
+        # 2. If you replied to someone
+        if message.reference and message.reference.resolved:
+            if isinstance(message.reference.resolved, discord.Message):
+                return message.reference.resolved.author
+                
+        # 3. If you typed a raw ID, check cache or server members
         target_id = None
         if arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
         elif arg.isdigit():
             target_id = int(arg)
-        
-        if not target_id:
-            return None
             
-        if target_id in self.cached_users:
-            return self.cached_users[target_id]
-            
-        if message.guild:
-            member = message.guild.get_member(target_id)
-            if member:
-                self.cached_users[target_id] = member
-                return member
+        if target_id:
+            if target_id in self.cached_users:
+                return self.cached_users[target_id]
+            if message.guild:
+                member = message.guild.get_member(target_id)
+                if member:
+                    self.cached_users[target_id] = member
+                    return member
+            # Try API as a last resort
+            try:
+                return await self.fetch_user(target_id)
+            except Exception:
+                return None
+        return None
 
-        try:
-            user = await self.fetch_user(target_id)
-            self.cached_users[target_id] = user
-            return user
-        except Exception:
-            return None
-
-    # --- HELP PAGINATION GENERATOR (ANSI) ---
+    # --- HELP MENU ---
     def generate_help(self, category=None, page=1):
         prefix = self.config.get('prefix', '-')
         
@@ -167,12 +163,11 @@ class SafeSelfBot(discord.Client):
     async def on_message(self, message):
         if message.author.bot:
             return
-            
-        if message.guild:
-            self.active_channels.add(message.channel)
 
+        # Instantly cache anyone who sends a message
         self.cached_users[message.author.id] = message.author
 
+        # --- LISTEN FOR TARGETS ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -188,6 +183,7 @@ class SafeSelfBot(discord.Client):
             
             return 
 
+        # --- COMMAND HANDLING ---
         prefix = self.config.get('prefix', '-')
         if not message.content.startswith(prefix):
             return
@@ -226,16 +222,10 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"> **Ping:** `{round(self.latency * 1000, 2)}ms`")
 
             elif cmd == 'avatar':
-                target = None
-                if message.reference and message.reference.resolved:
-                    target = message.reference.resolved.author
-                elif rest_args:
-                    target = await self.get_cached_user(message, rest_args[0])
-                    if not target:
-                        await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
-                        return
-                else:
-                    target = message.author
+                target = await self.resolve_user(message, rest_args[0] if rest_args else None)
+                if not target:
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
+                    return
 
                 avatar_url = target.display_avatar.url if hasattr(target, 'display_avatar') else target.avatar.url
                 
@@ -249,16 +239,10 @@ class SafeSelfBot(discord.Client):
                             await message.channel.send("> **Failed to download avatar.**")
 
             elif cmd == 'banner':
-                target = None
-                if message.reference and message.reference.resolved:
-                    target = message.reference.resolved.author
-                elif rest_args:
-                    target = await self.get_cached_user(message, rest_args[0])
-                    if not target:
-                        await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
-                        return
-                else:
-                    target = message.author
+                target = await self.resolve_user(message, rest_args[0] if rest_args else None)
+                if not target:
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
+                    return
 
                 if hasattr(target, 'banner') and target.banner:
                     banner_url = target.banner.url
@@ -271,7 +255,7 @@ class SafeSelfBot(discord.Client):
                             else:
                                 await message.channel.send("> **Failed to download banner.**")
                 else:
-                    await message.channel.send("> **User has no banner or is not cached.**")
+                    await message.channel.send("> **User has no banner.**")
 
             # --- MODERATION ---
             elif cmd == 'purge':
@@ -295,9 +279,9 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send("> **Usage:** `-dm <@user> <message>`")
                     return
                 
-                target = await self.get_cached_user(message, rest_args[0])
+                target = await self.resolve_user(message, rest_args[0])
                 if not target:
-                    await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
                     return
                 
                 text = " ".join(rest_args[1:])
@@ -313,9 +297,9 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send("> **Usage:** `-mock <@user>`")
                     return
                 
-                target = await self.get_cached_user(message, rest_args[0])
+                target = await self.resolve_user(message, rest_args[0])
                 if not target:
-                    await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
                     return
                 
                 if target.id == self.user.id:
@@ -330,11 +314,11 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send("> **Usage:** `-react <@user> <emoji>`")
                     return
                 
-                target = await self.get_cached_user(message, rest_args[0])
+                target = await self.resolve_user(message, rest_args[0])
                 emoji = rest_args[1]
                 
                 if not target:
-                    await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
                     return
                 
                 if target.id == self.user.id:
@@ -351,12 +335,10 @@ class SafeSelfBot(discord.Client):
 
             # --- INFORMATION ---
             elif cmd == 'userinfo':
-                target = message.author
-                if rest_args:
-                    target = await self.get_cached_user(message, rest_args[0])
-                    if not target:
-                        await message.channel.send("> **Could not find user.** Wait 3 seconds for cache to refresh.")
-                        return
+                target = await self.resolve_user(message, rest_args[0] if rest_args else None)
+                if not target:
+                    await message.channel.send("> **Could not find user.** Try replying to them or pinging them.")
+                    return
                 
                 info_text = (
                     f"> **User:** `{target.name}`\n"
