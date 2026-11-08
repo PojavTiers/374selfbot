@@ -90,6 +90,7 @@ class SafeSelfBot(discord.Client):
 
         async def get_user_from_arg(arg):
             if not arg: return None
+            # Clean the mention to get just the ID
             if arg.startswith('<@') and arg.endswith('>'):
                 uid = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
                 return await self.fetch_user(uid)
@@ -98,7 +99,7 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
-            # --- SHORT PROFESSIONAL HELP MENU (IN CODE BLOCK) ---
+            # --- HELP MENU (NO EMBEDS) ---
             if cmd == 'help':
                 help_text = (
                     "```ini\n"
@@ -128,19 +129,26 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
+            # --- FIXED AVATAR & BANNER ---
             elif cmd == 'avatar':
                 target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
                 if target:
-                    await message.channel.send(target.avatar.url if target.avatar else "No avatar.")
+                    # FIX: Using display_avatar ensures it pulls the URL correctly without 403
+                    avatar_url = target.display_avatar.url if hasattr(target, 'display_avatar') else target.avatar.url
+                    await message.channel.send(f"```{avatar_url}```")
+                else:
+                    await message.channel.send("```User not found.```")
 
             elif cmd == 'banner':
                 target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
                 if target:
                     user = await self.fetch_user(target.id)
                     if user.banner:
-                        await message.channel.send(user.banner.url)
+                        await message.channel.send(f"```{user.banner.url}```")
                     else:
                         await message.channel.send("```User has no banner.```")
+                else:
+                    await message.channel.send("```User not found.```")
 
             # --- MODERATION ---
             elif cmd == 'purge':
@@ -177,6 +185,8 @@ class SafeSelfBot(discord.Client):
                 if target_user:
                     last_msg = self.last_messages.get(str(message.channel.id), {}).get(str(target_user.id), "No recent messages.")
                     await message.channel.send(f"```\n{self.bypass_text(last_msg)}\n```")
+                else:
+                    await message.channel.send("```User not found.```")
 
             elif cmd == 'react':
                 if len(rest_args) < 2:
@@ -190,6 +200,8 @@ class SafeSelfBot(discord.Client):
                         return
                     self.auto_reacts[str(target_user.id)] = [emoji]
                     await message.channel.send(f"```Reacting to {target_user.name} with {emoji}```")
+                else:
+                    await message.channel.send("```User not found.```")
 
             elif cmd == 'clearreacts':
                 self.auto_reacts.clear()
@@ -207,6 +219,8 @@ class SafeSelfBot(discord.Client):
                         f"```"
                     )
                     await message.channel.send(info_text)
+                else:
+                    await message.channel.send("```User not found.```")
 
             elif cmd == 'serverinfo':
                 if not message.guild:
@@ -243,7 +257,9 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"```RPC set to {rtype} {text}```")
 
         except Exception as e:
-            await message.channel.send(f"```Error: {str(e)}```")
+            # Safely catch any errors and send them once
+            error_msg = f"```Error: {str(e)}```"
+            await message.channel.send(error_msg)
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
