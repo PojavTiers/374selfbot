@@ -40,15 +40,10 @@ class SafeSelfBot(discord.Client):
         with open(CONFIG_FILE, 'w') as f:
             json.dump(self.config, f, indent=4)
 
-    async def setup_hook(self):
-        print(f"[Client {self.token_index + 1}] Setting up...")
-        pass
-
     async def on_ready(self):
         self.user_id = self.user.id
         print(f'[Client {self.token_index + 1}] Selfbot ready. User ID: {self.user_id}')
         print(f'[Client {self.token_index + 1}] Prefix: {self.config["prefix"]}')
-        print(f'[Client {self.token_index + 1}] Ignoring all messages except your own (ID: {self.user_id})')
         
         try:
             await self.change_presence(activity=None)
@@ -116,28 +111,34 @@ class SafeSelfBot(discord.Client):
             self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
 
     async def on_message(self, message):
-        # --- THE FIX: Ignore everyone except YOU ---
+        # Ignore bots
+        if message.author.bot:
+            return
+
+        # Save other people's messages for the -mock command (but don't reply to them)
         if message.author.id != self.user.id:
-            return
+            channel_key = str(message.channel.id)
+            user_key = str(message.author.id)
+            if channel_key not in self.last_messages:
+                self.last_messages[channel_key] = {}
+            self.last_messages[channel_key][user_key] = message.content
+            
+            # Auto-react logic for other people
+            if str(message.author.id) in self.auto_reacts:
+                for emoji in self.auto_reacts[str(message.author.id)]:
+                    try:
+                        await message.add_reaction(emoji)
+                    except Exception:
+                        pass
+            return # Stop here if it's not you
 
-        # Ignore your own DMs to the bot (if you have any)
-        if not message.guild:
-            return
-
-        # If it's not a command, don't log it
+        # --- COMMAND HANDLING FOR YOU ONLY ---
         prefix = self.config.get('prefix', '-')
         if not message.content.startswith(prefix):
             return
 
-        # Log ONLY your commands
         print(f"COMMAND DETECTED: {message.content}")
 
-        # Store last messages for the -mock command
-        channel_key = str(message.channel.id)
-        user_key = str(message.author.id)
-        if channel_key not in self.last_messages:
-            self.last_messages[channel_key] = {}
-        
         args = message.content[len(prefix):].strip().split()
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
@@ -176,8 +177,7 @@ class SafeSelfBot(discord.Client):
                 if target_user:
                     last_msg = self.last_messages.get(str(message.channel.id), {}).get(str(target_user.id), "No recent messages.")
                     await message.channel.send(f"```\n{self.bypass_text(last_msg)}\n```")
-            
-            # --- THE REACT COMMAND ---
+
             elif cmd == 'react':
                 if len(rest_args) < 2:
                     await message.channel.send("```Usage: -react <@user> <emoji>```")
@@ -190,30 +190,6 @@ class SafeSelfBot(discord.Client):
 
         except Exception as e:
             await message.channel.send(f"```Error: {str(e)}```")
-
-    # --- LISTEN FOR OTHER PEOPLE'S MESSAGES (ONLY FOR REACT AND MOCK) ---
-    async def on_message_edit(self, before, after):
-        pass # We don't need edits for now
-        
-    async def on_message_create(self, message):
-        # This captures other people's messages so the bot knows what they said
-        # But it DOES NOT reply to them or log them to Railway.
-        if message.author.id == self.user.id:
-            return
-            
-        channel_key = str(message.channel.id)
-        user_key = str(message.author.id)
-        if channel_key not in self.last_messages:
-            self.last_messages[channel_key] = {}
-        self.last_messages[channel_key][user_key] = message.content
-
-        # Auto-react if the user is in the list
-        if str(message.author.id) in self.auto_reacts:
-            for emoji in self.auto_reacts[str(message.author.id)]:
-                try:
-                    await message.add_reaction(emoji)
-                except Exception:
-                    pass
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
