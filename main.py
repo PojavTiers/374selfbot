@@ -98,31 +98,23 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
-            # --- PROFESSIONAL HELP MENU (NO EMBEDS) ---
+            # --- SHORT PROFESSIONAL HELP MENU (IN CODE BLOCK) ---
             if cmd == 'help':
                 help_text = (
-                    "**374 SelfBot**\n"
-                    "Advanced Discord Selfbot Platform\n"
-                    f"**Prefix:** `{prefix}`\n\n"
-                    "**[ UTILITY ]**\n"
-                    f"`{prefix}ping` - Check latency\n"
-                    f"`{prefix}setprefix <char>` - Change prefix\n"
-                    f"`{prefix}avatar <@user>` - Get high-res avatar\n"
-                    f"`{prefix}banner <@user>` - Get profile banner\n\n"
-                    "**[ MODERATION ]**\n"
-                    f"`{prefix}purge <1-100>` - Delete your recent messages\n"
-                    f"`{prefix}dm <@user> <text>` - Send a direct message\n\n"
-                    "**[ FUN & INTERACTIONS ]**\n"
-                    f"`{prefix}react <@user> <emoji>` - Autoreact to a user\n"
-                    f"`{prefix}clearreacts` - Stop autoreacting\n"
-                    f"`{prefix}mock <@user>` - Mock their last message\n\n"
-                    "**[ INFORMATION ]**\n"
-                    f"`{prefix}userinfo <@user>` - Account details\n"
-                    f"`{prefix}serverinfo` - Server stats\n\n"
-                    "**[ RICH PRESENCE (RPC) ]**\n"
-                    f"`{prefix}rpc <type> <text>` - Set custom status\n"
-                    "*(Types: playing, watching, listening)*\n"
-                    f"*Example: `{prefix}rpc playing 374 SelfBot`*"
+                    "```ini\n"
+                    "374 SelfBot | Advanced Platform\n"
+                    f"Prefix: {prefix}\n\n"
+                    "[ UTILITY ]\n"
+                    f"{prefix}ping, {prefix}setprefix, {prefix}avatar, {prefix}banner\n\n"
+                    "[ MODERATION ]\n"
+                    f"{prefix}purge, {prefix}dm\n\n"
+                    "[ FUN ]\n"
+                    f"{prefix}react, {prefix}clearreacts, {prefix}mock\n\n"
+                    "[ INFO ]\n"
+                    f"{prefix}userinfo, {prefix}serverinfo\n\n"
+                    "[ RPC ]\n"
+                    f"{prefix}rpc <playing/watching/listening> <text>\n"
+                    "```"
                 )
                 await message.channel.send(help_text)
 
@@ -165,7 +157,6 @@ class SafeSelfBot(discord.Client):
                             deleted += 1
                         except Exception:
                             pass
-                # Removed delete_after to fix library bug
                 await message.channel.send(f"```Purged {deleted} messages.```")
 
             elif cmd == 'dm':
@@ -209,9 +200,11 @@ class SafeSelfBot(discord.Client):
                 target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
                 if target:
                     info_text = (
-                        f"**User Info: {target.name}**\n"
-                        f"ID: `{target.id}`\n"
-                        f"Created: `{target.created_at.strftime('%Y-%m-%d')}`\n"
+                        f"```ini\n"
+                        f"User: {target.name}\n"
+                        f"ID: {target.id}\n"
+                        f"Created: {target.created_at.strftime('%Y-%m-%d')}\n"
+                        f"```"
                     )
                     await message.channel.send(info_text)
 
@@ -220,9 +213,11 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send("```Must be used in a server.```")
                     return
                 server_text = (
-                    f"**Server Info: {message.guild.name}**\n"
-                    f"Members: `{message.guild.member_count}`\n"
-                    f"Created: `{message.guild.created_at.strftime('%Y-%m-%d')}`"
+                    f"```ini\n"
+                    f"Server: {message.guild.name}\n"
+                    f"Members: {message.guild.member_count}\n"
+                    f"Created: {message.guild.created_at.strftime('%Y-%m-%d')}\n"
+                    f"```"
                 )
                 await message.channel.send(server_text)
 
