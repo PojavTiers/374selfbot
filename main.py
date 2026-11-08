@@ -87,6 +87,17 @@ class SafeSelfBot(discord.Client):
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
         return text
 
+    # Helper to clean up the mention formatting
+    def format_arg(self, message, arg):
+        # If the arg is a mention, try to get the actual username
+        if arg.startswith('<@') and arg.endswith('>'):
+            target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+            if message.mentions and message.mentions[0].id == target_id:
+                return f"@{message.mentions[0].name}"
+            if target_id in self.cached_users:
+                return f"@{self.cached_users[target_id].name}"
+        return arg
+
     async def resolve_user(self, message, arg):
         if message.mentions:
             return message.mentions[0]
@@ -277,7 +288,6 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AUTO MOCK & REACT FOR TARGETS ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -297,9 +307,7 @@ class SafeSelfBot(discord.Client):
         if not message.content.startswith(prefix):
             return
 
-        # --- THE FIX: Delete the command message safely ---
         try:
-            # Wait 0.5s so the bot 100% reads the command before deleting it
             asyncio.create_task(self.delete_command_later(message))
         except Exception:
             pass
@@ -310,8 +318,6 @@ class SafeSelfBot(discord.Client):
 
         try:
             if cmd == 'help':
-                # Help already deletes its own message via its own logic
-                
                 if self.help_message_id:
                     try:
                         old_msg = await message.channel.fetch_message(self.help_message_id)
@@ -580,7 +586,6 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"> **Mass DM finished. Sent to** `{sent}` **users.**")
 
             elif cmd == 'ghostping':
-                # Ghostping handles its own deletion
                 try:
                     await message.delete()
                 except Exception:
@@ -758,7 +763,9 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'rate':
                 if not rest_args:
                     return
-                await message.channel.send(f"> **Rating** `{(' '.join(rest_args))}`: **{random.randint(1, 10)}/10**")
+                # Clean up the argument if it's a ping
+                cleaned_arg = self.format_arg(message, rest_args[0])
+                await message.channel.send(f"> **Rating** `{cleaned_arg}`: **{random.randint(1, 10)}/10**")
 
             # --- INFO ---
             elif cmd == 'userinfo':
@@ -856,7 +863,6 @@ class SafeSelfBot(discord.Client):
             await message.channel.send(f"> **Error:** `{str(e)}`")
 
     async def delete_command_later(self, message):
-        # Wait a fraction of a second for the bot to register the command
         await asyncio.sleep(0.5)
         try:
             await message.delete()
