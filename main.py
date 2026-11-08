@@ -26,9 +26,7 @@ class SafeSelfBot(discord.Client):
         self.user_id = None
         self.last_messages = {}
         self.auto_reacts = {}
-        self.rpc_list = []
         self.rpc_task = None
-        self.rpc_index = 0
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -62,54 +60,6 @@ class SafeSelfBot(discord.Client):
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
         return text
 
-    def build_activity(self, rpc_entry):
-        rtype = rpc_entry['type']
-        text = rpc_entry['text']
-        image = rpc_entry.get('image')
-        small = rpc_entry.get('small_image')
-        assets = {}
-        if image:
-            assets['large_image'] = image
-            assets['large_text'] = text
-        if small:
-            assets['small_image'] = small
-
-        if rtype == 'playing':
-            return discord.Activity(type=discord.ActivityType.playing, name=text, assets=assets)
-        elif rtype == 'listening':
-            return discord.Activity(type=discord.ActivityType.listening, name=text, assets=assets)
-        elif rtype == 'watching':
-            return discord.Activity(type=discord.ActivityType.watching, name=text, assets=assets)
-        elif rtype == 'streaming':
-            return discord.Streaming(name=text, url="https://twitch.tv/yourusername")
-        return None
-
-    async def _rpc_rotation_loop(self):
-        try:
-            while self.rpc_list:
-                if len(self.rpc_list) == 1:
-                    self.rpc_index = 0
-                    act = self.build_activity(self.rpc_list[0])
-                    if act: await self.change_presence(activity=act)
-                    await asyncio.sleep(30)
-                    continue
-                self.rpc_index %= len(self.rpc_list)
-                act = self.build_activity(self.rpc_list[self.rpc_index])
-                if act: await self.change_presence(activity=act)
-                self.rpc_index = (self.rpc_index + 1) % len(self.rpc_list)
-                await asyncio.sleep(15)
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"[Client {self.token_index + 1}] RPC loop error: {e}")
-
-    def restart_rpc_rotation(self):
-        if self.rpc_task and not self.rpc_task.done():
-            self.rpc_task.cancel()
-        self.rpc_index = 0
-        if self.rpc_list:
-            self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
-
     async def on_message(self, message):
         if message.author.bot:
             return
@@ -130,18 +80,17 @@ class SafeSelfBot(discord.Client):
                         pass
             return 
 
-        # --- COMMAND HANDLING FOR YOU ONLY ---
+        # --- COMMAND HANDLING ---
         prefix = self.config.get('prefix', '-')
         if not message.content.startswith(prefix):
             return
-
-        print(f"COMMAND DETECTED: {message.content}")
 
         args = message.content[len(prefix):].strip().split()
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
         async def get_user_from_arg(arg):
+            if not arg: return None
             if arg.startswith('<@') and arg.endswith('>'):
                 uid = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
                 return await self.fetch_user(uid)
@@ -150,25 +99,95 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
+            # --- PROFESSIONAL HELP MENU (NO EMOJIS) ---
             if cmd == 'help':
-                help_text = (
-                    "**Selfbot Commands**\n"
-                    f"```\n{prefix}help\n{prefix}setprefix <char>\n"
-                    f"{prefix}ping\n{prefix}react <@user> <emoji>\n{prefix}mock <@user>\n```"
+                embed = discord.Embed(
+                    title="374 SelfBot",
+                    description="Advanced Discord Selfbot Platform\n**Prefix:** `-`",
+                    color=0xff0000
                 )
-                await message.channel.send(help_text)
+                embed.add_field(
+                    name="[ UTILITY ]", 
+                    value=f"`{prefix}ping` - Check latency\n`{prefix}setprefix <char>` - Change prefix\n`{prefix}avatar <@user>` - Get high-res avatar\n`{prefix}banner <@user>` - Get profile banner", 
+                    inline=False
+                )
+                embed.add_field(
+                    name="[ MODERATION ]", 
+                    value=f"`{prefix}purge <1-100>` - Delete your recent messages\n`{prefix}dm <@user> <text>` - Send a direct message", 
+                    inline=False
+                )
+                embed.add_field(
+                    name="[ FUN & INTERACTIONS ]", 
+                    value=f"`{prefix}react <@user> <emoji>` - Autoreact to a user\n`{prefix}clearreacts` - Stop autoreacting\n`{prefix}mock <@user>` - Mock their last message", 
+                    inline=False
+                )
+                embed.add_field(
+                    name="[ INFORMATION ]", 
+                    value=f"`{prefix}userinfo <@user>` - Account details\n`{prefix}serverinfo` - Server stats", 
+                    inline=False
+                )
+                embed.add_field(
+                    name="[ RICH PRESENCE (RPC) ]", 
+                    value=f"`{prefix}rpc <type> <text>` - Set custom status\n*(Types: playing, watching, listening)*\n*Example: `-rpc playing 374 SelfBot`*", 
+                    inline=False
+                )
+                embed.set_footer(text="374 SelfBot | 2024")
+                await message.channel.send(embed=embed)
 
+            # --- UTILITY ---
             elif cmd == 'setprefix':
                 if rest_args:
                     self.config['prefix'] = rest_args[0]
                     self.save_config()
                     await message.channel.send(f"```Prefix changed to {self.config['prefix']}```")
-                else:
-                    await message.channel.send(f"```Current prefix: {self.config['prefix']}```")
 
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
+            elif cmd == 'avatar':
+                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
+                if target:
+                    await message.channel.send(target.avatar.url if target.avatar else "No avatar.")
+
+            elif cmd == 'banner':
+                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
+                if target:
+                    user = await self.fetch_user(target.id)
+                    if user.banner:
+                        await message.channel.send(user.banner.url)
+                    else:
+                        await message.channel.send("```User has no banner.```")
+
+            # --- MODERATION ---
+            elif cmd == 'purge':
+                if not rest_args or not rest_args[0].isdigit():
+                    await message.channel.send("```Usage: -purge <amount>```")
+                    return
+                amount = min(int(rest_args[0]), 100) 
+                
+                deleted = 0
+                async for msg in message.channel.history(limit=200):
+                    if msg.author.id == self.user.id and deleted < amount:
+                        try:
+                            await msg.delete()
+                            deleted += 1
+                        except Exception:
+                            pass
+                await message.channel.send(f"```Purged {deleted} messages.```", delete_after=3)
+
+            elif cmd == 'dm':
+                target = await get_user_from_arg(rest_args[0]) if rest_args else None
+                if not target or len(rest_args) < 2:
+                    await message.channel.send("```Usage: -dm <@user> <message>```")
+                    return
+                text = " ".join(rest_args[1:])
+                try:
+                    await target.send(text)
+                    await message.channel.send(f"```Sent DM to {target.name}```")
+                except Exception:
+                    await message.channel.send("```Failed to send DM.```")
+
+            # --- FUN & INTERACTIONS ---
             elif cmd == 'mock':
                 target_user = await get_user_from_arg(rest_args[0]) if rest_args else None
                 if target_user:
@@ -182,13 +201,56 @@ class SafeSelfBot(discord.Client):
                 target_user = await get_user_from_arg(rest_args[0])
                 emoji = rest_args[1]
                 if target_user:
-                    # --- FIX: Prevent reacting to yourself to avoid 403 Forbidden ---
                     if target_user.id == self.user.id:
                         await message.channel.send("```You cannot autoreact to yourself. Pick someone else.```")
                         return
-                    
                     self.auto_reacts[str(target_user.id)] = [emoji]
                     await message.channel.send(f"```Reacting to {target_user.name} with {emoji}```")
+
+            elif cmd == 'clearreacts':
+                self.auto_reacts.clear()
+                await message.channel.send("```All autoreacts cleared.```")
+
+            # --- INFORMATION ---
+            elif cmd == 'userinfo':
+                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
+                if target:
+                    embed = discord.Embed(title=f"User Info: {target.name}", color=0x7289da)
+                    embed.add_field(name="ID", value=f"`{target.id}`")
+                    embed.add_field(name="Created", value=f"`{target.created_at.strftime('%Y-%m-%d')}`")
+                    embed.set_thumbnail(url=target.avatar.url if target.avatar else None)
+                    await message.channel.send(embed=embed)
+
+            elif cmd == 'serverinfo':
+                if not message.guild:
+                    await message.channel.send("```Must be used in a server.```")
+                    return
+                embed = discord.Embed(title=f"Server Info: {message.guild.name}", color=0x7289da)
+                embed.add_field(name="Members", value=f"`{message.guild.member_count}`")
+                embed.add_field(name="Created", value=f"`{message.guild.created_at.strftime('%Y-%m-%d')}`")
+                embed.set_thumbnail(url=message.guild.icon.url if message.guild.icon else None)
+                await message.channel.send(embed=embed)
+
+            # --- RPC ---
+            elif cmd == 'rpc':
+                if not rest_args or len(rest_args) < 2:
+                    await message.channel.send("```Usage: -rpc <playing/watching/listening> <text>```")
+                    return
+                rtype = rest_args[0].lower()
+                text = " ".join(rest_args[1:])
+                
+                if rtype == 'playing':
+                    act = discord.Activity(type=discord.ActivityType.playing, name=text)
+                elif rtype == 'watching':
+                    act = discord.Activity(type=discord.ActivityType.watching, name=text)
+                elif rtype == 'listening':
+                    act = discord.Activity(type=discord.ActivityType.listening, name=text)
+                else:
+                    await message.channel.send("```Invalid type. Use playing, watching, or listening.```")
+                    return
+                
+                await self.change_presence(activity=act)
+                await message.channel.send(f"```RPC set to {rtype} {text}```")
 
         except Exception as e:
             await message.channel.send(f"```Error: {str(e)}```")
