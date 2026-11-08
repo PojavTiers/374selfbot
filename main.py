@@ -26,7 +26,6 @@ class SafeSelfBot(discord.Client):
         self.user_id = None
         self.last_messages = {}
         self.auto_reacts = {}
-        self.rpc_task = None
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -99,40 +98,33 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
-            # --- PROFESSIONAL HELP MENU (NO EMOJIS) ---
+            # --- PROFESSIONAL HELP MENU (NO EMBEDS) ---
             if cmd == 'help':
-                embed = discord.Embed(
-                    title="374 SelfBot",
-                    description="Advanced Discord Selfbot Platform\n**Prefix:** `-`",
-                    color=0xff0000
+                help_text = (
+                    "**374 SelfBot**\n"
+                    "Advanced Discord Selfbot Platform\n"
+                    f"**Prefix:** `{prefix}`\n\n"
+                    "**[ UTILITY ]**\n"
+                    f"`{prefix}ping` - Check latency\n"
+                    f"`{prefix}setprefix <char>` - Change prefix\n"
+                    f"`{prefix}avatar <@user>` - Get high-res avatar\n"
+                    f"`{prefix}banner <@user>` - Get profile banner\n\n"
+                    "**[ MODERATION ]**\n"
+                    f"`{prefix}purge <1-100>` - Delete your recent messages\n"
+                    f"`{prefix}dm <@user> <text>` - Send a direct message\n\n"
+                    "**[ FUN & INTERACTIONS ]**\n"
+                    f"`{prefix}react <@user> <emoji>` - Autoreact to a user\n"
+                    f"`{prefix}clearreacts` - Stop autoreacting\n"
+                    f"`{prefix}mock <@user>` - Mock their last message\n\n"
+                    "**[ INFORMATION ]**\n"
+                    f"`{prefix}userinfo <@user>` - Account details\n"
+                    f"`{prefix}serverinfo` - Server stats\n\n"
+                    "**[ RICH PRESENCE (RPC) ]**\n"
+                    f"`{prefix}rpc <type> <text>` - Set custom status\n"
+                    "*(Types: playing, watching, listening)*\n"
+                    f"*Example: `{prefix}rpc playing 374 SelfBot`*"
                 )
-                embed.add_field(
-                    name="[ UTILITY ]", 
-                    value=f"`{prefix}ping` - Check latency\n`{prefix}setprefix <char>` - Change prefix\n`{prefix}avatar <@user>` - Get high-res avatar\n`{prefix}banner <@user>` - Get profile banner", 
-                    inline=False
-                )
-                embed.add_field(
-                    name="[ MODERATION ]", 
-                    value=f"`{prefix}purge <1-100>` - Delete your recent messages\n`{prefix}dm <@user> <text>` - Send a direct message", 
-                    inline=False
-                )
-                embed.add_field(
-                    name="[ FUN & INTERACTIONS ]", 
-                    value=f"`{prefix}react <@user> <emoji>` - Autoreact to a user\n`{prefix}clearreacts` - Stop autoreacting\n`{prefix}mock <@user>` - Mock their last message", 
-                    inline=False
-                )
-                embed.add_field(
-                    name="[ INFORMATION ]", 
-                    value=f"`{prefix}userinfo <@user>` - Account details\n`{prefix}serverinfo` - Server stats", 
-                    inline=False
-                )
-                embed.add_field(
-                    name="[ RICH PRESENCE (RPC) ]", 
-                    value=f"`{prefix}rpc <type> <text>` - Set custom status\n*(Types: playing, watching, listening)*\n*Example: `-rpc playing 374 SelfBot`*", 
-                    inline=False
-                )
-                embed.set_footer(text="374 SelfBot | 2024")
-                await message.channel.send(embed=embed)
+                await message.channel.send(help_text)
 
             # --- UTILITY ---
             elif cmd == 'setprefix':
@@ -173,7 +165,8 @@ class SafeSelfBot(discord.Client):
                             deleted += 1
                         except Exception:
                             pass
-                await message.channel.send(f"```Purged {deleted} messages.```", delete_after=3)
+                # Removed delete_after to fix library bug
+                await message.channel.send(f"```Purged {deleted} messages.```")
 
             elif cmd == 'dm':
                 target = await get_user_from_arg(rest_args[0]) if rest_args else None
@@ -215,21 +208,23 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'userinfo':
                 target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
                 if target:
-                    embed = discord.Embed(title=f"User Info: {target.name}", color=0x7289da)
-                    embed.add_field(name="ID", value=f"`{target.id}`")
-                    embed.add_field(name="Created", value=f"`{target.created_at.strftime('%Y-%m-%d')}`")
-                    embed.set_thumbnail(url=target.avatar.url if target.avatar else None)
-                    await message.channel.send(embed=embed)
+                    info_text = (
+                        f"**User Info: {target.name}**\n"
+                        f"ID: `{target.id}`\n"
+                        f"Created: `{target.created_at.strftime('%Y-%m-%d')}`\n"
+                    )
+                    await message.channel.send(info_text)
 
             elif cmd == 'serverinfo':
                 if not message.guild:
                     await message.channel.send("```Must be used in a server.```")
                     return
-                embed = discord.Embed(title=f"Server Info: {message.guild.name}", color=0x7289da)
-                embed.add_field(name="Members", value=f"`{message.guild.member_count}`")
-                embed.add_field(name="Created", value=f"`{message.guild.created_at.strftime('%Y-%m-%d')}`")
-                embed.set_thumbnail(url=message.guild.icon.url if message.guild.icon else None)
-                await message.channel.send(embed=embed)
+                server_text = (
+                    f"**Server Info: {message.guild.name}**\n"
+                    f"Members: `{message.guild.member_count}`\n"
+                    f"Created: `{message.guild.created_at.strftime('%Y-%m-%d')}`"
+                )
+                await message.channel.send(server_text)
 
             # --- RPC ---
             elif cmd == 'rpc':
