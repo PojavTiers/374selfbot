@@ -28,6 +28,7 @@ class SafeSelfBot(discord.Client):
         self.auto_reacts = {}
         self.auto_mocks = {} 
         self.cached_users = {} 
+        self.processed_messages = set() # Prevents double sending
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -49,7 +50,6 @@ class SafeSelfBot(discord.Client):
         except Exception:
             pass
 
-    # --- INSTANT CACHE UPDATERS ---
     async def on_member_join(self, member):
         self.cached_users[member.id] = member
 
@@ -71,22 +71,18 @@ class SafeSelfBot(discord.Client):
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
         return text
 
-    # --- SMART USER RESOLVER (NO API 403 ERRORS) ---
     async def resolve_user(self, message, arg):
-        # 1. If you pinged someone, grab them directly from the message mentions
         if message.mentions:
             return message.mentions[0]
             
-        # 2. If you replied to someone
         if message.reference and message.reference.resolved:
             if isinstance(message.reference.resolved, discord.Message):
                 return message.reference.resolved.author
                 
-        # 3. If you typed a raw ID, check cache or server members
         target_id = None
-        if arg.startswith('<@') and arg.endswith('>'):
+        if arg and arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
-        elif arg.isdigit():
+        elif arg and arg.isdigit():
             target_id = int(arg)
             
         if target_id:
@@ -97,46 +93,55 @@ class SafeSelfBot(discord.Client):
                 if member:
                     self.cached_users[target_id] = member
                     return member
-            # Try API as a last resort
             try:
                 return await self.fetch_user(target_id)
             except Exception:
                 return None
         return None
 
-    # --- HELP MENU ---
+    # --- 3-SECTION PROFESSIONAL HELP MENU ---
     def generate_help(self, category=None, page=1):
         prefix = self.config.get('prefix', '-')
         
+        # Main Menu
         if category is None:
-            return (
-                "```ansi\n"
-                f"\u001b[2;31m374 SelfBot Prefix: {prefix}\u001b[0m\n\n"
-                f"\u001b[1;36m[ UTILITY ]\u001b[0m - {prefix}ping, {prefix}avatar, {prefix}setprefix\n"
-                f"\u001b[1;36m[ MODERATION ]\u001b[0m - {prefix}purge, {prefix}dm\n"
-                f"\u001b[1;36m[ FUN ]\u001b[0m - {prefix}mock, {prefix}react, {prefix}stop\n"
-                f"\u001b[1;36m[ INFO ]\u001b[0m - {prefix}userinfo, {prefix}serverinfo\n"
-                f"\u001b[1;36m[ RPC ]\u001b[0m - {prefix}rpc\n\n"
-                f"\u001b[2;30mType {prefix}help <category> to see all commands.\u001b[0m\n"
+            header = "```ansi\n\u001b[1;36m374 SelfBot | Main Menu\u001b[0m\n\u001b[0;37mPage 1 of 1\u001b[0m\n```"
+            body = (
+                "```ini\n"
+                f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setprefix\n"
+                f"[ MODERATION ] - {prefix}purge, {prefix}dm\n"
+                f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}stop\n"
+                f"[ INFO ] - {prefix}userinfo, {prefix}serverinfo\n"
+                f"[ RPC ] - {prefix}rpc\n"
                 "```"
             )
-        
+            footer = f"```ansi\n\u001b[2;30mType {prefix}help <category> to view commands. (e.g. {prefix}help fun)\u001b[0m\n```"
+            return f"{header}\n{body}\n{footer}"
+
+        # Detailed Categories
         categories = {
             "utility": [
-                [f"{prefix}ping", f"{prefix}setprefix <char>", f"{prefix}avatar <@user>"],
-                [f"{prefix}banner <@user>"]
+                {"cmd": f"{prefix}ping", "desc": "Check bot latency"},
+                {"cmd": f"{prefix}setprefix <char>", "desc": "Change command prefix"},
+                {"cmd": f"{prefix}avatar <@user>", "desc": "Get user's avatar"},
+                {"cmd": f"{prefix}banner <@user>", "desc": "Get user's profile banner"}
             ],
             "moderation": [
-                [f"{prefix}purge <1-100>", f"{prefix}dm <@user> <msg>"]
+                {"cmd": f"{prefix}purge <1-100>", "desc": "Delete your recent messages"},
+                {"cmd": f"{prefix}dm <@user> <msg>", "desc": "Send a direct message"}
             ],
             "fun": [
-                [f"{prefix}mock <@user>", f"{prefix}react <@user> <emoji>", f"{prefix}stop"]
+                {"cmd": f"{prefix}mock <@user>", "desc": "Repeat their messages"},
+                {"cmd": f"{prefix}react <@user> <emoji>", "desc": "Auto-react to a user"},
+                {"cmd": f"{prefix}stop", "desc": "Stop all mocks and reacts"}
             ],
             "info": [
-                [f"{prefix}userinfo <@user>", f"{prefix}serverinfo"]
+                {"cmd": f"{prefix}userinfo <@user>", "desc": "Get account details"},
+                {"cmd": f"{prefix}serverinfo", "desc": "Get server statistics"}
             ],
             "rpc": [
-                [f"{prefix}rpc <playing/watching/listening> <text>"]
+                {"cmd": f"{prefix}rpc <type> <text>", "desc": "Set custom rich presence"},
+                {"cmd": "", "desc": "Types: playing, watching, listening"}
             ]
         }
 
@@ -144,27 +149,65 @@ class SafeSelfBot(discord.Client):
         if cat_lower not in categories:
             return "> **Invalid category.** Available: utility, moderation, fun, info, rpc"
 
-        pages = categories[cat_lower]
-        total_pages = len(pages)
+        cmds = categories[cat_lower]
         
-        if page < 1 or page > total_pages:
-            page = 1
+        # Pagination Logic (3 commands per page)
+        items_per_page = 3
+        total_pages = max(1, -(-len(cmds) // items_per_page)) # Ceiling division
+        
+        if page < 1: page = 1
+        if page > total_pages: page = total_pages
 
-        cmd_list = "\n".join([f"- {cmd}" for cmd in pages[page - 1]])
-        
-        return (
+        start_idx = (page - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        page_cmds = cmds[start_idx:end_idx]
+
+        # Build 3 Sections
+        header = (
             "```ansi\n"
-            f"\u001b[1;31m374 SelfBot | {cat_lower.capitalize()} Commands\u001b[0m\n"
-            f"\u001b[2;30mPage {page} of {total_pages}\u001b[0m\n\n"
-            f"\u001b[0;37m{cmd_list}\u001b[0m\n"
+            f"\u001b[1;36m374 SelfBot | {cat_lower.capitalize()} Commands\u001b[0m\n"
+            f"\u001b[0;37mPage {page} of {total_pages}\u001b[0m\n"
             "```"
         )
 
+        body_lines = []
+        for item in page_cmds:
+            if item["cmd"]:
+                body_lines.append(f"{item['cmd']}\n> {item['desc']}")
+            else:
+                body_lines.append(f"> {item['desc']}")
+        
+        body = "```ini\n" + "\n\n".join(body_lines) + "\n```"
+
+        # Footer Navigation
+        nav_hints = []
+        if page > 1:
+            nav_hints.append(f"Prev: {prefix}help {cat_lower} {page-1}")
+        if page < total_pages:
+            nav_hints.append(f"Next: {prefix}help {cat_lower} {page+1}")
+        
+        if nav_hints:
+            footer_text = " | ".join(nav_hints)
+        else:
+            footer_text = f"Type {prefix}help to go back to main menu."
+
+        footer = f"```ansi\n\u001b[2;30m{footer_text}\u001b[0m\n```"
+
+        return f"{header}\n{body}\n{footer}"
+
     async def on_message(self, message):
+        # Prevent double sending due to Discord gateway glitches
+        if message.id in self.processed_messages:
+            return
+        self.processed_messages.add(message.id)
+        
+        # Keep memory clean
+        if len(self.processed_messages) > 500:
+            self.processed_messages.clear()
+
         if message.author.bot:
             return
 
-        # Instantly cache anyone who sends a message
         self.cached_users[message.author.id] = message.author
 
         # --- LISTEN FOR TARGETS ---
@@ -193,7 +236,6 @@ class SafeSelfBot(discord.Client):
         rest_args = args[1:]
 
         try:
-            # --- HELP SYSTEM ---
             if cmd == 'help':
                 try:
                     await message.delete()
@@ -211,7 +253,6 @@ class SafeSelfBot(discord.Client):
                 help_text = self.generate_help(category, page)
                 await message.channel.send(help_text)
 
-            # --- UTILITY ---
             elif cmd == 'setprefix':
                 if rest_args:
                     self.config['prefix'] = rest_args[0]
@@ -257,7 +298,6 @@ class SafeSelfBot(discord.Client):
                 else:
                     await message.channel.send("> **User has no banner.**")
 
-            # --- MODERATION ---
             elif cmd == 'purge':
                 if not rest_args or not rest_args[0].isdigit():
                     await message.channel.send("> **Usage:** `-purge <amount>`")
@@ -291,7 +331,6 @@ class SafeSelfBot(discord.Client):
                 except Exception:
                     await message.channel.send("> **Failed to send DM** (User has DMs closed).")
 
-            # --- FUN & INTERACTIONS ---
             elif cmd == 'mock':
                 if not rest_args:
                     await message.channel.send("> **Usage:** `-mock <@user>`")
@@ -333,7 +372,6 @@ class SafeSelfBot(discord.Client):
                 self.auto_mocks.clear()
                 await message.channel.send("> **All auto-reacts and auto-mocks have been cleared.**")
 
-            # --- INFORMATION ---
             elif cmd == 'userinfo':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
@@ -358,7 +396,6 @@ class SafeSelfBot(discord.Client):
                 )
                 await message.channel.send(server_text)
 
-            # --- RPC ---
             elif cmd == 'rpc':
                 if not rest_args or len(rest_args) < 2:
                     await message.channel.send("> **Usage:** `-rpc <playing/watching/listening> <text>`")
