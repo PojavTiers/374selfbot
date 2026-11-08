@@ -88,15 +88,6 @@ class SafeSelfBot(discord.Client):
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
-        async def get_user_from_arg(arg):
-            if not arg: return None
-            if arg.startswith('<@') and arg.endswith('>'):
-                uid = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
-                return await self.fetch_user(uid)
-            elif arg.isdigit():
-                return await self.fetch_user(int(arg))
-            return None
-
         try:
             # --- HELP MENU ---
             if cmd == 'help':
@@ -128,30 +119,32 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
-            # --- FIXED AVATAR COMMAND (NO API FETCH) ---
+            # --- 403-FREE AVATAR ---
             elif cmd == 'avatar':
                 target = None
                 
-                # 1. If you replied to a message, grab that user
+                # 1. Check if you replied to a message
                 if message.reference and message.reference.resolved:
                     target = message.reference.resolved.author
-                
-                # 2. If you pinged someone
+                # 2. Check if you pinged someone
                 elif rest_args:
-                    try:
-                        target = await get_user_from_arg(rest_args[0])
-                    except Exception:
-                        pass # Ignore 403 if it happens
-                
-                # 3. If you didn't ping or reply, grab your own avatar
+                    # Clean the ping string manually to avoid API calls
+                    arg = rest_args[0]
+                    if arg.startswith('<@') and arg.endswith('>'):
+                        target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+                        # Try to find them in the current channel's cached members
+                        target = message.guild.get_member(target_id) if message.guild else None
+                        if not target:
+                            await message.channel.send("```User not in cache. Please reply to their message instead.```")
+                            return
+                # 3. Default to yourself
                 else:
                     target = message.author
 
                 if not target:
-                    await message.channel.send("```User not found (Privacy settings blocked the fetch).```")
+                    await message.channel.send("```User not found.```")
                     return
 
-                # Extract the URL directly from the cached object
                 avatar_url = None
                 if hasattr(target, 'display_avatar') and target.display_avatar:
                     avatar_url = target.display_avatar.url
@@ -163,19 +156,26 @@ class SafeSelfBot(discord.Client):
                 else:
                     await message.channel.send("```User has no avatar.```")
 
+            # --- 403-FREE BANNER ---
             elif cmd == 'banner':
-                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
-                if target:
-                    try:
-                        user = await self.fetch_user(target.id)
-                        if user.banner:
-                            await message.channel.send(f"```{user.banner.url}```")
-                        else:
-                            await message.channel.send("```User has no banner.```")
-                    except Exception:
-                        await message.channel.send("```Failed to fetch banner (Privacy settings).```")
+                target = None
+                if message.reference and message.reference.resolved:
+                    target = message.reference.resolved.author
+                elif rest_args:
+                    arg = rest_args[0]
+                    if arg.startswith('<@') and arg.endswith('>'):
+                        target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+                        target = message.guild.get_member(target_id) if message.guild else None
+                        if not target:
+                            await message.channel.send("```User not in cache. Reply to their message instead.```")
+                            return
                 else:
-                    await message.channel.send("```User not found.```")
+                    target = message.author
+
+                if target and hasattr(target, 'banner') and target.banner:
+                    await message.channel.send(f"```{target.banner.url}```")
+                else:
+                    await message.channel.send("```User has no banner or is not cached.```")
 
             # --- MODERATION ---
             elif cmd == 'purge':
@@ -195,48 +195,87 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"```Purged {deleted} messages.```")
 
             elif cmd == 'dm':
-                target = await get_user_from_arg(rest_args[0]) if rest_args else None
-                if not target or len(rest_args) < 2:
+                # Note: DMing requires an API call, so this might still 403 if the user has DMs closed.
+                if len(rest_args) < 2:
                     await message.channel.send("```Usage: -dm <@user> <message>```")
                     return
-                text = " ".join(rest_args[1:])
-                try:
-                    await target.send(text)
-                    await message.channel.send(f"```Sent DM to {target.name}```")
-                except Exception:
-                    await message.channel.send("```Failed to send DM.```")
+                
+                arg = rest_args[0]
+                if arg.startswith('<@') and arg.endswith('>'):
+                    target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+                    target = message.guild.get_member(target_id) if message.guild else None
+                    if not target:
+                        await message.channel.send("```User not in cache.```")
+                        return
+                    
+                    text = " ".join(rest_args[1:])
+                    try:
+                        await target.send(text)
+                        await message.channel.send(f"```Sent DM to {target.name}```")
+                    except Exception:
+                        await message.channel.send("```Failed to send DM (User has DMs closed).```")
 
-            # --- FUN & INTERACTIONS ---
+            # --- 403-FREE MOCK ---
             elif cmd == 'mock':
-                target_user = await get_user_from_arg(rest_args[0]) if rest_args else None
-                if target_user:
-                    last_msg = self.last_messages.get(str(message.channel.id), {}).get(str(target_user.id), "No recent messages.")
+                target_id = None
+                target_name = "User"
+                
+                if message.reference and message.reference.resolved:
+                    target_id = str(message.reference.resolved.author.id)
+                    target_name = message.reference.resolved.author.name
+                elif rest_args:
+                    arg = rest_args[0]
+                    if arg.startswith('<@') and arg.endswith('>'):
+                        target_id = arg.replace('<@', '').replace('>', '').replace('!', '')
+                    else:
+                        target_id = arg
+                else:
+                    await message.channel.send("```Reply to a message or ping someone to mock them.```")
+                    return
+
+                last_msg = self.last_messages.get(str(message.channel.id), {}).get(target_id)
+                
+                if last_msg:
                     await message.channel.send(f"```\n{self.bypass_text(last_msg)}\n```")
                 else:
-                    await message.channel.send("```User not found.```")
+                    await message.channel.send("```No recent messages from this user found in cache.```")
 
+            # --- 403-FREE REACT ---
             elif cmd == 'react':
                 if len(rest_args) < 2:
                     await message.channel.send("```Usage: -react <@user> <emoji>```")
                     return
-                target_user = await get_user_from_arg(rest_args[0])
+                
+                arg = rest_args[0]
                 emoji = rest_args[1]
-                if target_user:
-                    if target_user.id == self.user.id:
+                target_id = None
+                
+                if arg.startswith('<@') and arg.endswith('>'):
+                    target_id = arg.replace('<@', '').replace('>', '').replace('!', '')
+                else:
+                    target_id = arg
+                
+                if target_id:
+                    if str(target_id) == str(self.user.id):
                         await message.channel.send("```You cannot autoreact to yourself. Pick someone else.```")
                         return
-                    self.auto_reacts[str(target_user.id)] = [emoji]
-                    await message.channel.send(f"```Reacting to {target_user.name} with {emoji}```")
-                else:
-                    await message.channel.send("```User not found.```")
+                    
+                    self.auto_reacts[str(target_id)] = [emoji]
+                    await message.channel.send(f"```Autoreact set for user ID {target_id} with {emoji}```")
 
             elif cmd == 'clearreacts':
                 self.auto_reacts.clear()
                 await message.channel.send("```All autoreacts cleared.```")
 
-            # --- INFORMATION ---
+            # --- INFORMATION (CACHED) ---
             elif cmd == 'userinfo':
-                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
+                target = message.author
+                if rest_args:
+                    arg = rest_args[0]
+                    if arg.startswith('<@') and arg.endswith('>'):
+                        target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+                        target = message.guild.get_member(target_id) if message.guild else None
+                
                 if target:
                     info_text = (
                         f"```ini\n"
@@ -247,7 +286,7 @@ class SafeSelfBot(discord.Client):
                     )
                     await message.channel.send(info_text)
                 else:
-                    await message.channel.send("```User not found.```")
+                    await message.channel.send("```User not in cache.```")
 
             elif cmd == 'serverinfo':
                 if not message.guild:
