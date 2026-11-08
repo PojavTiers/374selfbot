@@ -36,6 +36,9 @@ class SafeSelfBot(discord.Client):
         self.sniped_messages = {}
         self.editsniped_messages = {}
         self.current_rpc = None
+        
+        # Tracks the help message so we can delete it later
+        self.help_message_id = None 
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -290,10 +293,19 @@ class SafeSelfBot(discord.Client):
 
         try:
             if cmd == 'help':
+                # 1. Delete the command you just typed
                 try:
                     await message.delete()
                 except Exception:
                     pass
+                    
+                # 2. Delete the OLD help message if it exists
+                if self.help_message_id:
+                    try:
+                        old_msg = await message.channel.fetch_message(self.help_message_id)
+                        await old_msg.delete()
+                    except Exception:
+                        pass # The message was probably already deleted by someone else
 
                 category = None
                 page = 1
@@ -304,7 +316,9 @@ class SafeSelfBot(discord.Client):
                     page = int(rest_args[1])
 
                 help_text = self.generate_help(category, page)
-                await message.channel.send(help_text)
+                # 3. Send the new help message and save its ID
+                new_help_msg = await message.channel.send(help_text)
+                self.help_message_id = new_help_msg.id
 
             # --- UTILITY ---
             elif cmd == 'setprefix':
@@ -555,7 +569,6 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"> **Mass DM finished. Sent to** `{sent}` **users.**")
 
             elif cmd == 'ghostping':
-                # FIXED GHOSTPING
                 try:
                     await message.delete()
                 except Exception:
