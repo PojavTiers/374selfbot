@@ -20,7 +20,14 @@ print(f"Found {len(TOKENS)} token(s). Starting clients...")
 
 class SafeSelfBot(discord.Client):
     def __init__(self, token_index=0):
-        super().__init__(self_bot=True)
+        # THE FIX: We explicitly ask Discord for message content
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.messages = True
+        intents.guilds = True
+        intents.dm_messages = True
+        
+        super().__init__(self_bot=True, intents=intents)
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
@@ -42,7 +49,6 @@ class SafeSelfBot(discord.Client):
 
     async def setup_hook(self):
         print(f"[Client {self.token_index + 1}] Setting up...")
-        # Removed change_presence here to prevent the 'NoneType' crash
         pass
 
     async def on_ready(self):
@@ -50,7 +56,6 @@ class SafeSelfBot(discord.Client):
         print(f'[Client {self.token_index + 1}] Selfbot ready. User ID: {self.user_id}')
         print(f'[Client {self.token_index + 1}] Prefix: {self.config["prefix"]}')
         
-        # Now that we are fully ready, it's safe to change presence
         try:
             await self.change_presence(activity=None)
         except Exception:
@@ -117,6 +122,9 @@ class SafeSelfBot(discord.Client):
             self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
 
     async def on_message(self, message):
+        # Add a debug print to the Railway logs so we can see if it receives messages
+        print(f"Message received: {message.content} from {message.author}")
+
         if message.author == self.user:
             return
 
@@ -141,6 +149,8 @@ class SafeSelfBot(discord.Client):
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
+        print(f"Command detected: {cmd}")
+
         async def get_user_from_arg(arg):
             if arg.startswith('<@') and arg.endswith('>'):
                 uid = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
@@ -152,7 +162,7 @@ class SafeSelfBot(discord.Client):
         try:
             if cmd == 'help':
                 embed = discord.Embed(title="Selfbot Commands", color=0x7289da)
-                embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}setpfp <url/@user>\n{self.config['prefix']}customstatus <text>\n{self.config['prefix']}clearstatus\n{self.config['prefix']}userinfo <@user>\n{self.config['prefix']}serverinfo\n{self.config['prefix']}avatar <@user>\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
+                embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
                 await message.channel.send(embed=embed)
 
             elif cmd == 'setprefix':
@@ -169,45 +179,6 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'say':
                 text = " ".join(rest_args)
                 if text: await message.channel.send(text)
-
-            elif cmd == 'userinfo' or cmd == 'ui':
-                target = message.author
-                if rest_args:
-                    target = await get_user_from_arg(rest_args[0]) or target
-                
-                embed = discord.Embed(title=f"User Info: {target}", color=target.color if target.color else 0x7289da)
-                embed.add_field(name="Username", value=f"```{target.name}```", inline=True)
-                embed.add_field(name="User ID", value=f"```{target.id}```", inline=True)
-                embed.add_field(name="Created At", value=f"```{target.created_at.strftime('%Y-%m-%d %H:%M:%S')}```", inline=True)
-                
-                joined_at = "N/A"
-                if message.guild and message.guild.get_member(target.id):
-                    member = message.guild.get_member(target.id)
-                    if member.joined_at:
-                        joined_at = member.joined_at.strftime('%Y-%m-%d %H:%M:%S')
-                
-                embed.add_field(name="Joined Server At", value=f"```{joined_at}```", inline=True)
-                embed.set_thumbnail(url=target.avatar.url if target.avatar else target.default_avatar.url)
-                await message.channel.send(embed=embed)
-
-            elif cmd == 'serverinfo' or cmd == 'si':
-                guild = message.guild
-                if not guild:
-                    await message.channel.send("```This command must be used in a server.```")
-                    return
-                embed = discord.Embed(title=f"Server Info: {guild.name}", color=0x7289da)
-                embed.add_field(name="Server Name", value=f"```{guild.name}```", inline=True)
-                embed.add_field(name="Server ID", value=f"```{guild.id}```", inline=True)
-                embed.add_field(name="Members", value=f"```{guild.member_count}```", inline=True)
-                await message.channel.send(embed=embed)
-
-            elif cmd == 'avatar' or cmd == 'av':
-                target = message.author
-                if rest_args:
-                    target = await get_user_from_arg(rest_args[0]) or target
-                embed = discord.Embed(title=f"Avatar of {target}", color=0x7289da)
-                embed.set_image(url=target.avatar.url if target.avatar else target.default_avatar.url)
-                await message.channel.send(embed=embed)
 
             elif cmd == 'mock':
                 target_user = await get_user_from_arg(rest_args[0]) if rest_args else None
