@@ -28,7 +28,7 @@ class SafeSelfBot(discord.Client):
         self.auto_reacts = {}
         self.auto_mocks = {} 
         self.cached_users = {} 
-        self.processed_messages = set() # Prevents double sending
+        self.processed_messages = set()
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -99,11 +99,9 @@ class SafeSelfBot(discord.Client):
                 return None
         return None
 
-    # --- 3-SECTION PROFESSIONAL HELP MENU ---
     def generate_help(self, category=None, page=1):
         prefix = self.config.get('prefix', '-')
         
-        # Main Menu
         if category is None:
             header = "```ansi\n\u001b[1;36m374 SelfBot | Main Menu\u001b[0m\n\u001b[0;37mPage 1 of 1\u001b[0m\n```"
             body = (
@@ -118,7 +116,6 @@ class SafeSelfBot(discord.Client):
             footer = f"```ansi\n\u001b[2;30mType {prefix}help <category> to view commands. (e.g. {prefix}help fun)\u001b[0m\n```"
             return f"{header}\n{body}\n{footer}"
 
-        # Detailed Categories
         categories = {
             "utility": [
                 {"cmd": f"{prefix}ping", "desc": "Check bot latency"},
@@ -151,9 +148,8 @@ class SafeSelfBot(discord.Client):
 
         cmds = categories[cat_lower]
         
-        # Pagination Logic (3 commands per page)
         items_per_page = 3
-        total_pages = max(1, -(-len(cmds) // items_per_page)) # Ceiling division
+        total_pages = max(1, -(-len(cmds) // items_per_page))
         
         if page < 1: page = 1
         if page > total_pages: page = total_pages
@@ -162,7 +158,6 @@ class SafeSelfBot(discord.Client):
         end_idx = start_idx + items_per_page
         page_cmds = cmds[start_idx:end_idx]
 
-        # Build 3 Sections
         header = (
             "```ansi\n"
             f"\u001b[1;36m374 SelfBot | {cat_lower.capitalize()} Commands\u001b[0m\n"
@@ -179,7 +174,6 @@ class SafeSelfBot(discord.Client):
         
         body = "```ini\n" + "\n\n".join(body_lines) + "\n```"
 
-        # Footer Navigation
         nav_hints = []
         if page > 1:
             nav_hints.append(f"Prev: {prefix}help {cat_lower} {page-1}")
@@ -196,12 +190,10 @@ class SafeSelfBot(discord.Client):
         return f"{header}\n{body}\n{footer}"
 
     async def on_message(self, message):
-        # Prevent double sending due to Discord gateway glitches
         if message.id in self.processed_messages:
             return
         self.processed_messages.add(message.id)
         
-        # Keep memory clean
         if len(self.processed_messages) > 500:
             self.processed_messages.clear()
 
@@ -210,7 +202,6 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- LISTEN FOR TARGETS ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -226,7 +217,6 @@ class SafeSelfBot(discord.Client):
             
             return 
 
-        # --- COMMAND HANDLING ---
         prefix = self.config.get('prefix', '-')
         if not message.content.startswith(prefix):
             return
@@ -346,7 +336,8 @@ class SafeSelfBot(discord.Client):
                     return
                 
                 self.auto_mocks[str(target.id)] = True
-                await message.channel.send(f"> **Mocking {target.name}.** Every message they send will be repeated.")
+                # FIXED OUTPUT HERE
+                await message.channel.send(f"> **Mocking {target.name}**")
 
             elif cmd == 'react':
                 if len(rest_args) < 2:
