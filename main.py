@@ -111,7 +111,6 @@ class SafeSelfBot(discord.Client):
             self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
 
     async def on_message(self, message):
-        # Ignore bots
         if message.author.bot:
             return
 
@@ -151,11 +150,10 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
-            # --- THE FIX: Replaced embeds with plain text in code blocks ---
             if cmd == 'help':
                 help_text = (
                     "**Selfbot Commands**\n"
-                    f"```\n{prefix}help\n{prefix}setprefix <char>\n{prefix}say <text>\n"
+                    f"```\n{prefix}help\n{prefix}setprefix <char>\n"
                     f"{prefix}ping\n{prefix}react <@user> <emoji>\n{prefix}mock <@user>\n```"
                 )
                 await message.channel.send(help_text)
@@ -171,10 +169,6 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
-            elif cmd == 'say':
-                text = " ".join(rest_args)
-                if text: await message.channel.send(text)
-
             elif cmd == 'mock':
                 target_user = await get_user_from_arg(rest_args[0]) if rest_args else None
                 if target_user:
@@ -188,6 +182,11 @@ class SafeSelfBot(discord.Client):
                 target_user = await get_user_from_arg(rest_args[0])
                 emoji = rest_args[1]
                 if target_user:
+                    # --- FIX: Prevent reacting to yourself to avoid 403 Forbidden ---
+                    if target_user.id == self.user.id:
+                        await message.channel.send("```You cannot autoreact to yourself. Pick someone else.```")
+                        return
+                    
                     self.auto_reacts[str(target_user.id)] = [emoji]
                     await message.channel.send(f"```Reacting to {target_user.name} with {emoji}```")
 
