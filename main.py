@@ -33,11 +33,8 @@ class SafeSelfBot(discord.Client):
         self.cached_users = {} 
         self.processed_messages = set()
         
-        # Sniping memory
         self.sniped_messages = {}
         self.editsniped_messages = {}
-        
-        # Current RPC memory for image adding
         self.current_rpc = None
 
     def load_config(self):
@@ -69,7 +66,6 @@ class SafeSelfBot(discord.Client):
     async def on_user_update(self, before, after):
         self.cached_users[after.id] = after
 
-    # --- SNIPE MEMORY ---
     async def on_message_delete(self, message):
         if not message.author.bot and message.guild:
             self.sniped_messages[message.channel.id] = (message.content, message.author, datetime.datetime.now())
@@ -118,7 +114,6 @@ class SafeSelfBot(discord.Client):
         return None
 
     async def get_anime_gif(self, category):
-        # Fetches a random anime GIF from waifu.pics
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://api.waifu.pics/sfw/{category}") as resp:
                 if resp.status == 200:
@@ -150,12 +145,12 @@ class SafeSelfBot(discord.Client):
                 {"cmd": f"{prefix}avatar <@user>", "desc": "Get user's avatar"},
                 {"cmd": f"{prefix}banner <@user>", "desc": "Get user's profile banner"},
                 {"cmd": f"{prefix}setbio <text>", "desc": "Change your profile bio"},
-                {"cmd": f"{prefix}setstatus <status> [text]", "desc": "Change status (online/idle/dnd/invisible) and text"},
-                {"cmd": f"{prefix}serverbanner", "desc": "Get current server's banner"},
-                {"cmd": f"{prefix}servericon", "desc": "Get current server's icon"},
+                {"cmd": f"{prefix}setstatus <status> [text]", "desc": "Change status and text"},
+                {"cmd": f"{prefix}serverbanner", "desc": "Get server banner"},
+                {"cmd": f"{prefix}servericon", "desc": "Get server icon"},
                 {"cmd": f"{prefix}snowflake <ID>", "desc": "Get creation date of an ID"},
                 {"cmd": f"{prefix}joined <@user>", "desc": "When they joined the server"},
-                {"cmd": f"{prefix}created <@user>", "desc": "When they created their account"},
+                {"cmd": f"{prefix}created <@user>", "desc": "When they created account"},
                 {"cmd": f"{prefix}channelinfo", "desc": "Info about current channel"},
                 {"cmd": f"{prefix}invite", "desc": "Get server invite"},
                 {"cmd": f"{prefix}poll <question>", "desc": "Simple 10s text poll"}
@@ -219,7 +214,7 @@ class SafeSelfBot(discord.Client):
             return "> **Invalid category.** Available: utility, moderation, fun, info, rpc"
 
         cmds = categories[cat_lower]
-        items_per_page = 5 # Increased to 5 per page for better layout
+        items_per_page = 5 
         total_pages = max(1, -(-len(cmds) // items_per_page))
         
         if page < 1: page = 1
@@ -481,7 +476,7 @@ class SafeSelfBot(discord.Client):
                         try:
                             await msg.delete()
                             deleted += 1
-                            await asyncio.sleep(1) # Anti-rate limit
+                            await asyncio.sleep(1) 
                         except Exception:
                             pass
                 await message.channel.send(f"> **Purged** `{deleted}` **messages from {target.name}.**")
@@ -554,19 +549,23 @@ class SafeSelfBot(discord.Client):
                             try:
                                 await member.send(text)
                                 sent += 1
-                                await asyncio.sleep(2) # Delay to prevent instant ban
+                                await asyncio.sleep(2) 
                             except Exception:
                                 pass
                 await message.channel.send(f"> **Mass DM finished. Sent to** `{sent}` **users.**")
 
             elif cmd == 'ghostping':
-                await message.delete()
-                await message.channel.send(f"> {message.author.mention}")
+                # FIXED GHOSTPING
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                ping_msg = await message.channel.send(message.author.mention)
                 await asyncio.sleep(1)
-                async for msg in message.channel.history(limit=1):
-                    if msg.author.id == self.user.id:
-                        await msg.delete()
-                break
+                try:
+                    await ping_msg.delete()
+                except Exception:
+                    pass
 
             elif cmd in ['snipe', 's']:
                 if message.channel.id in self.sniped_messages:
@@ -677,7 +676,6 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ascii':
                 if not rest_args:
                     return
-                # Very basic text to emoji-ASCII
                 ascii_out = " ".join([f":regional_indicator_{c.lower()}:" for c in " ".join(rest_args) if c.isalpha()])
                 await message.channel.send(f"> {ascii_out[:2000] if ascii_out else 'No letters.'}")
 
@@ -746,7 +744,6 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"> **374 SelfBot**\n> **Ping:** `{round(self.latency * 1000, 2)}ms`\n> **Python:** `3.9+`\n> **Library:** `discord.py-self`")
 
             elif cmd == 'uptime':
-                # Uptime is tracked based on when the bot started, which we don't strictly track in this file, so we'll fake a timer
                 await message.channel.send("> **Bot has been running since deployment.**")
 
             elif cmd == 'status':
@@ -809,7 +806,6 @@ class SafeSelfBot(discord.Client):
                         return
                     img_url = rest_args[1]
                     
-                    # Update current RPC with image
                     if self.current_rpc:
                         self.current_rpc.assets = {'large_image': img_url}
                         await self.change_presence(activity=self.current_rpc)
