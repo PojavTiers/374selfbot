@@ -90,7 +90,6 @@ class SafeSelfBot(discord.Client):
 
         async def get_user_from_arg(arg):
             if not arg: return None
-            # Clean the mention to get just the ID
             if arg.startswith('<@') and arg.endswith('>'):
                 uid = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
                 return await self.fetch_user(uid)
@@ -99,7 +98,7 @@ class SafeSelfBot(discord.Client):
             return None
 
         try:
-            # --- HELP MENU (NO EMBEDS) ---
+            # --- HELP MENU ---
             if cmd == 'help':
                 help_text = (
                     "```ini\n"
@@ -129,24 +128,52 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
-            # --- FIXED AVATAR & BANNER ---
+            # --- FIXED AVATAR COMMAND (NO API FETCH) ---
             elif cmd == 'avatar':
-                target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
-                if target:
-                    # FIX: Using display_avatar ensures it pulls the URL correctly without 403
-                    avatar_url = target.display_avatar.url if hasattr(target, 'display_avatar') else target.avatar.url
+                target = None
+                
+                # 1. If you replied to a message, grab that user
+                if message.reference and message.reference.resolved:
+                    target = message.reference.resolved.author
+                
+                # 2. If you pinged someone
+                elif rest_args:
+                    try:
+                        target = await get_user_from_arg(rest_args[0])
+                    except Exception:
+                        pass # Ignore 403 if it happens
+                
+                # 3. If you didn't ping or reply, grab your own avatar
+                else:
+                    target = message.author
+
+                if not target:
+                    await message.channel.send("```User not found (Privacy settings blocked the fetch).```")
+                    return
+
+                # Extract the URL directly from the cached object
+                avatar_url = None
+                if hasattr(target, 'display_avatar') and target.display_avatar:
+                    avatar_url = target.display_avatar.url
+                elif hasattr(target, 'avatar') and target.avatar:
+                    avatar_url = target.avatar.url
+
+                if avatar_url:
                     await message.channel.send(f"```{avatar_url}```")
                 else:
-                    await message.channel.send("```User not found.```")
+                    await message.channel.send("```User has no avatar.```")
 
             elif cmd == 'banner':
                 target = await get_user_from_arg(rest_args[0]) if rest_args else message.author
                 if target:
-                    user = await self.fetch_user(target.id)
-                    if user.banner:
-                        await message.channel.send(f"```{user.banner.url}```")
-                    else:
-                        await message.channel.send("```User has no banner.```")
+                    try:
+                        user = await self.fetch_user(target.id)
+                        if user.banner:
+                            await message.channel.send(f"```{user.banner.url}```")
+                        else:
+                            await message.channel.send("```User has no banner.```")
+                    except Exception:
+                        await message.channel.send("```Failed to fetch banner (Privacy settings).```")
                 else:
                     await message.channel.send("```User not found.```")
 
@@ -257,9 +284,7 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"```RPC set to {rtype} {text}```")
 
         except Exception as e:
-            # Safely catch any errors and send them once
-            error_msg = f"```Error: {str(e)}```"
-            await message.channel.send(error_msg)
+            await message.channel.send(f"```Error: {str(e)}```")
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
