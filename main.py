@@ -24,8 +24,8 @@ class SafeSelfBot(discord.Client):
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
-        self.last_messages = {}
         self.auto_reacts = {}
+        self.auto_mocks = {} 
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -63,20 +63,22 @@ class SafeSelfBot(discord.Client):
         if message.author.bot:
             return
 
-        # Save other people's messages for the -mock command
+        # --- LISTEN FOR TARGETS ---
         if message.author.id != self.user.id:
-            channel_key = str(message.channel.id)
-            user_key = str(message.author.id)
-            if channel_key not in self.last_messages:
-                self.last_messages[channel_key] = {}
-            self.last_messages[channel_key][user_key] = message.content
-            
+            # 1. Auto-react
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
                     try:
                         await message.add_reaction(emoji)
                     except Exception:
                         pass
+            
+            # 2. Auto-mock (Repeats their message instantly as normal text)
+            if str(message.author.id) in self.auto_mocks:
+                safe_text = self.bypass_text(message.content)
+                if safe_text.strip(): 
+                    await message.channel.send(safe_text) # NO CODE BLOCKS
+            
             return 
 
         # --- COMMAND HANDLING ---
@@ -100,7 +102,7 @@ class SafeSelfBot(discord.Client):
                     "[ MODERATION ]\n"
                     f"{prefix}purge, {prefix}dm\n\n"
                     "[ FUN ]\n"
-                    f"{prefix}react, {prefix}clearreacts, {prefix}mock\n\n"
+                    f"{prefix}react, {prefix}mock, {prefix}stop\n\n"
                     "[ INFO ]\n"
                     f"{prefix}userinfo, {prefix}serverinfo\n\n"
                     "[ RPC ]\n"
@@ -119,45 +121,8 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
-            # --- 403-FREE AVATAR ---
+            # --- AVATAR ---
             elif cmd == 'avatar':
-                target = None
-                
-                # 1. Check if you replied to a message
-                if message.reference and message.reference.resolved:
-                    target = message.reference.resolved.author
-                # 2. Check if you pinged someone
-                elif rest_args:
-                    # Clean the ping string manually to avoid API calls
-                    arg = rest_args[0]
-                    if arg.startswith('<@') and arg.endswith('>'):
-                        target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
-                        # Try to find them in the current channel's cached members
-                        target = message.guild.get_member(target_id) if message.guild else None
-                        if not target:
-                            await message.channel.send("```User not in cache. Please reply to their message instead.```")
-                            return
-                # 3. Default to yourself
-                else:
-                    target = message.author
-
-                if not target:
-                    await message.channel.send("```User not found.```")
-                    return
-
-                avatar_url = None
-                if hasattr(target, 'display_avatar') and target.display_avatar:
-                    avatar_url = target.display_avatar.url
-                elif hasattr(target, 'avatar') and target.avatar:
-                    avatar_url = target.avatar.url
-
-                if avatar_url:
-                    await message.channel.send(f"```{avatar_url}```")
-                else:
-                    await message.channel.send("```User has no avatar.```")
-
-            # --- 403-FREE BANNER ---
-            elif cmd == 'banner':
                 target = None
                 if message.reference and message.reference.resolved:
                     target = message.reference.resolved.author
@@ -172,8 +137,31 @@ class SafeSelfBot(discord.Client):
                 else:
                     target = message.author
 
+                if not target:
+                    await message.channel.send("```User not found.```")
+                    return
+
+                avatar_url = target.display_avatar.url if hasattr(target, 'display_avatar') else target.avatar.url
+                if avatar_url:
+                    await message.channel.send(f"**{target.name}'s Avatar**\n{avatar_url}")
+                else:
+                    await message.channel.send("```User has no avatar.```")
+
+            # --- BANNER ---
+            elif cmd == 'banner':
+                target = None
+                if message.reference and message.reference.resolved:
+                    target = message.reference.resolved.author
+                elif rest_args:
+                    arg = rest_args[0]
+                    if arg.startswith('<@') and arg.endswith('>'):
+                        target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+                        target = message.guild.get_member(target_id) if message.guild else None
+                else:
+                    target = message.author
+
                 if target and hasattr(target, 'banner') and target.banner:
-                    await message.channel.send(f"```{target.banner.url}```")
+                    await message.channel.send(f"**{target.name}'s Banner**\n{target.banner.url}")
                 else:
                     await message.channel.send("```User has no banner or is not cached.```")
 
@@ -195,7 +183,6 @@ class SafeSelfBot(discord.Client):
                 await message.channel.send(f"```Purged {deleted} messages.```")
 
             elif cmd == 'dm':
-                # Note: DMing requires an API call, so this might still 403 if the user has DMs closed.
                 if len(rest_args) < 2:
                     await message.channel.send("```Usage: -dm <@user> <message>```")
                     return
@@ -215,32 +202,25 @@ class SafeSelfBot(discord.Client):
                     except Exception:
                         await message.channel.send("```Failed to send DM (User has DMs closed).```")
 
-            # --- 403-FREE MOCK ---
+            # --- FUN & INTERACTIONS ---
             elif cmd == 'mock':
-                target_id = None
-                target_name = "User"
-                
-                if message.reference and message.reference.resolved:
-                    target_id = str(message.reference.resolved.author.id)
-                    target_name = message.reference.resolved.author.name
-                elif rest_args:
-                    arg = rest_args[0]
-                    if arg.startswith('<@') and arg.endswith('>'):
-                        target_id = arg.replace('<@', '').replace('>', '').replace('!', '')
-                    else:
-                        target_id = arg
-                else:
-                    await message.channel.send("```Reply to a message or ping someone to mock them.```")
+                if not rest_args:
+                    await message.channel.send("```Usage: -mock <@user>```")
                     return
-
-                last_msg = self.last_messages.get(str(message.channel.id), {}).get(target_id)
                 
-                if last_msg:
-                    await message.channel.send(f"```\n{self.bypass_text(last_msg)}\n```")
+                arg = rest_args[0]
+                if arg.startswith('<@') and arg.endswith('>'):
+                    target_id = arg.replace('<@', '').replace('>', '').replace('!', '')
                 else:
-                    await message.channel.send("```No recent messages from this user found in cache.```")
+                    target_id = arg
+                
+                if str(target_id) == str(self.user.id):
+                    await message.channel.send("```You cannot mock yourself.```")
+                    return
+                
+                self.auto_mocks[str(target_id)] = True
+                await message.channel.send(f"```Now mocking user ID {target_id}. Every message they send will be repeated.```")
 
-            # --- 403-FREE REACT ---
             elif cmd == 'react':
                 if len(rest_args) < 2:
                     await message.channel.send("```Usage: -react <@user> <emoji>```")
@@ -248,26 +228,25 @@ class SafeSelfBot(discord.Client):
                 
                 arg = rest_args[0]
                 emoji = rest_args[1]
-                target_id = None
                 
                 if arg.startswith('<@') and arg.endswith('>'):
                     target_id = arg.replace('<@', '').replace('>', '').replace('!', '')
                 else:
                     target_id = arg
                 
-                if target_id:
-                    if str(target_id) == str(self.user.id):
-                        await message.channel.send("```You cannot autoreact to yourself. Pick someone else.```")
-                        return
-                    
-                    self.auto_reacts[str(target_id)] = [emoji]
-                    await message.channel.send(f"```Autoreact set for user ID {target_id} with {emoji}```")
+                if str(target_id) == str(self.user.id):
+                    await message.channel.send("```You cannot autoreact to yourself.```")
+                    return
+                
+                self.auto_reacts[str(target_id)] = [emoji]
+                await message.channel.send(f"```Autoreact set for user ID {target_id} with {emoji}```")
 
-            elif cmd == 'clearreacts':
+            elif cmd == 'stop':
                 self.auto_reacts.clear()
-                await message.channel.send("```All autoreacts cleared.```")
+                self.auto_mocks.clear()
+                await message.channel.send("```All auto-reacts and auto-mocks have been cleared.```")
 
-            # --- INFORMATION (CACHED) ---
+            # --- INFORMATION ---
             elif cmd == 'userinfo':
                 target = message.author
                 if rest_args:
