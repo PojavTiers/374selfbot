@@ -4,8 +4,6 @@ import json
 import os
 import re
 import asyncio
-import hashlib
-from urllib.parse import quote
 
 # --- CONFIGURATION ---
 CONFIG_FILE = 'config.json'
@@ -14,14 +12,11 @@ TOKENS_RAW = os.getenv('DISCORD_TOKEN')
 if not TOKENS_RAW:
     raise ValueError("Please set the DISCORD_TOKEN environment variable.")
 
-# THE FIX: This strips out any hidden spaces, newlines, or quotes!
 TOKENS = [t.strip().strip('"').strip("'") for t in TOKENS_RAW.split(',') if t.strip()]
 if not TOKENS:
     raise ValueError("No valid tokens found in DISCORD_TOKEN environment variable.")
 
 print(f"Found {len(TOKENS)} token(s). Starting clients...")
-
-RPC_TYPES = ['playing', 'streaming', 'listening', 'watching']
 
 class SafeSelfBot(discord.Client):
     def __init__(self, token_index=0):
@@ -46,13 +41,20 @@ class SafeSelfBot(discord.Client):
             json.dump(self.config, f, indent=4)
 
     async def setup_hook(self):
-        print(f"[Client {self.token_index + 1}] Logged in as {self.user}")
-        await self.change_presence(activity=None)
+        print(f"[Client {self.token_index + 1}] Setting up...")
+        # Removed change_presence here to prevent the 'NoneType' crash
+        pass
 
     async def on_ready(self):
         self.user_id = self.user.id
         print(f'[Client {self.token_index + 1}] Selfbot ready. User ID: {self.user_id}')
         print(f'[Client {self.token_index + 1}] Prefix: {self.config["prefix"]}')
+        
+        # Now that we are fully ready, it's safe to change presence
+        try:
+            await self.change_presence(activity=None)
+        except Exception:
+            pass
 
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
@@ -151,14 +153,13 @@ class SafeSelfBot(discord.Client):
             if cmd == 'help':
                 embed = discord.Embed(title="Selfbot Commands", color=0x7289da)
                 embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}setpfp <url/@user>\n{self.config['prefix']}customstatus <text>\n{self.config['prefix']}clearstatus\n{self.config['prefix']}userinfo <@user>\n{self.config['prefix']}serverinfo\n{self.config['prefix']}avatar <@user>\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
-                embed.add_field(name="Rich Presence", value=f"```{self.config['prefix']}rpc set <type> <text> [image|none]\n{self.config['prefix']}rpc clear```", inline=False)
                 await message.channel.send(embed=embed)
 
             elif cmd == 'setprefix':
                 if rest_args:
                     self.config['prefix'] = rest_args[0]
                     self.save_config()
-                    await message.channel.send(f"```Prefix changed to {self.config['prefix']}```") # FIXED BACKTICKS HERE
+                    await message.channel.send(f"```Prefix changed to {self.config['prefix']}```")
                 else:
                     await message.channel.send(f"```Current prefix: {self.config['prefix']}```")
 
@@ -208,16 +209,6 @@ class SafeSelfBot(discord.Client):
                 embed.set_image(url=target.avatar.url if target.avatar else target.default_avatar.url)
                 await message.channel.send(embed=embed)
 
-            elif cmd == 'rpc':
-                if rest_args and rest_args[0] == 'clear':
-                    self.rpc_list.clear()
-                    if self.rpc_task and not self.rpc_task.done():
-                        self.rpc_task.cancel()
-                    await self.change_presence(activity=None)
-                    await message.channel.send("```All RPC entries cleared.```")
-                else:
-                    await message.channel.send("```Usage: -rpc clear```")
-            
             elif cmd == 'mock':
                 target_user = await get_user_from_arg(rest_args[0]) if rest_args else None
                 if target_user:
