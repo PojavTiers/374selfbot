@@ -14,7 +14,8 @@ TOKENS_RAW = os.getenv('DISCORD_TOKEN')
 if not TOKENS_RAW:
     raise ValueError("Please set the DISCORD_TOKEN environment variable.")
 
-TOKENS = [t.strip() for t in TOKENS_RAW.split(',') if t.strip()]
+# THE FIX: This strips out any hidden spaces, newlines, or quotes!
+TOKENS = [t.strip().strip('"').strip("'") for t in TOKENS_RAW.split(',') if t.strip()]
 if not TOKENS:
     raise ValueError("No valid tokens found in DISCORD_TOKEN environment variable.")
 
@@ -56,11 +57,9 @@ class SafeSelfBot(discord.Client):
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
             return text
-
         def replace_number(match):
             num = int(match.group())
             return "99" if num < 13 else match.group()
-
         text = re.sub(r'\b\d+\b', replace_number, text)
         text = re.sub(r'underage', 'overage', text, flags=re.IGNORECASE)
         text = re.sub(r'\bi\b', 'you', text, flags=re.IGNORECASE)
@@ -72,7 +71,6 @@ class SafeSelfBot(discord.Client):
         text = rpc_entry['text']
         image = rpc_entry.get('image')
         small = rpc_entry.get('small_image')
-
         assets = {}
         if image:
             assets['large_image'] = image
@@ -99,7 +97,6 @@ class SafeSelfBot(discord.Client):
                     if act: await self.change_presence(activity=act)
                     await asyncio.sleep(30)
                     continue
-
                 self.rpc_index %= len(self.rpc_list)
                 act = self.build_activity(self.rpc_list[self.rpc_index])
                 if act: await self.change_presence(activity=act)
@@ -153,24 +150,24 @@ class SafeSelfBot(discord.Client):
         try:
             if cmd == 'help':
                 embed = discord.Embed(title="Selfbot Commands", color=0x7289da)
-                embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}setpfp <url/@user>\n{self.config['prefix']}customstatus <text>\n{self.config['prefix']}clearstatus\n{self.config['prefix']}userinfo <@user>\n{self.config['prefix']}serverinfo\n{self.config['prefix']}avatar <@user>\n{self.config['prefix']}channel_info\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
-                embed.add_field(name="Rich Presence", value=f"```{self.config['prefix']}rpc set <type> <text> [image|none] [small_image|none]\n{self.config['prefix']}rpc clear```", inline=False)
+                embed.add_field(name="Utility", value=f"```{self.config['prefix']}help\n{self.config['prefix']}setprefix <char>\n{self.config['prefix']}setpfp <url/@user>\n{self.config['prefix']}customstatus <text>\n{self.config['prefix']}clearstatus\n{self.config['prefix']}userinfo <@user>\n{self.config['prefix']}serverinfo\n{self.config['prefix']}avatar <@user>\n{self.config['prefix']}say <text>\n{self.config['prefix']}ping```", inline=False)
+                embed.add_field(name="Rich Presence", value=f"```{self.config['prefix']}rpc set <type> <text> [image|none]\n{self.config['prefix']}rpc clear```", inline=False)
                 await message.channel.send(embed=embed)
 
             elif cmd == 'setprefix':
                 if rest_args:
                     self.config['prefix'] = rest_args[0]
                     self.save_config()
-                    await message.channel.send(f"```Prefix changed to `{self.config['prefix']}````")
+                    await message.channel.send(f"```Prefix changed to {self.config['prefix']}```") # FIXED BACKTICKS HERE
                 else:
-                    await message.channel.send(f"```Current prefix: `{self.config['prefix']}````")
+                    await message.channel.send(f"```Current prefix: {self.config['prefix']}```")
 
             elif cmd == 'ping':
                 await message.channel.send(f"```Ping: {round(self.latency * 1000, 2)}ms```")
 
             elif cmd == 'say':
                 text = " ".join(rest_args)
-                if text: await message.channel.send(f"```{text}```")
+                if text: await message.channel.send(text)
 
             elif cmd == 'userinfo' or cmd == 'ui':
                 target = message.author
@@ -181,7 +178,7 @@ class SafeSelfBot(discord.Client):
                 embed.add_field(name="Username", value=f"```{target.name}```", inline=True)
                 embed.add_field(name="User ID", value=f"```{target.id}```", inline=True)
                 embed.add_field(name="Created At", value=f"```{target.created_at.strftime('%Y-%m-%d %H:%M:%S')}```", inline=True)
-                # FIXED CRASH HERE: Safely check if member data exists
+                
                 joined_at = "N/A"
                 if message.guild and message.guild.get_member(target.id):
                     member = message.guild.get_member(target.id)
@@ -228,14 +225,7 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send(f"```\n{self.bypass_text(last_msg)}\n```")
 
         except Exception as e:
-            # This stops the bot from crashing if a command fails
             await message.channel.send(f"```Error: {str(e)}```")
-
-    async def on_message_delete(self, message):
-        channel_key = str(message.channel.id)
-        user_key = str(message.author.id)
-        if channel_key in self.last_messages and user_key in self.last_messages[channel_key]:
-            del self.last_messages[channel_key][user_key]
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
