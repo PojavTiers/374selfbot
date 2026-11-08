@@ -36,8 +36,6 @@ class SafeSelfBot(discord.Client):
         self.sniped_messages = {}
         self.editsniped_messages = {}
         self.current_rpc = None
-        
-        # Tracks the help message so we can delete it later
         self.help_message_id = None 
 
     def load_config(self):
@@ -116,12 +114,25 @@ class SafeSelfBot(discord.Client):
                 return None
         return None
 
+    # --- SWAPPED TO A RELIABLE API (Nekos.best) ---
     async def get_anime_gif(self, category):
+        # Map commands to Nekos.best endpoints
+        endpoint_map = {
+            'hug': 'hug',
+            'slap': 'slap',
+            'kiss': 'kiss',
+            'pat': 'pat'
+        }
+        endpoint = endpoint_map.get(category, 'hug')
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.waifu.pics/sfw/{category}") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("url")
+            try:
+                async with session.get(f"https://nekos.best/api/v2/{endpoint}") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data['results'][0]['url']
+            except Exception as e:
+                print(f"GIF API Error: {e}")
         return None
 
     def generate_help(self, category=None, page=1):
@@ -293,19 +304,17 @@ class SafeSelfBot(discord.Client):
 
         try:
             if cmd == 'help':
-                # 1. Delete the command you just typed
                 try:
                     await message.delete()
                 except Exception:
                     pass
                     
-                # 2. Delete the OLD help message if it exists
                 if self.help_message_id:
                     try:
                         old_msg = await message.channel.fetch_message(self.help_message_id)
                         await old_msg.delete()
                     except Exception:
-                        pass # The message was probably already deleted by someone else
+                        pass
 
                 category = None
                 page = 1
@@ -316,7 +325,6 @@ class SafeSelfBot(discord.Client):
                     page = int(rest_args[1])
 
                 help_text = self.generate_help(category, page)
-                # 3. Send the new help message and save its ID
                 new_help_msg = await message.channel.send(help_text)
                 self.help_message_id = new_help_msg.id
 
@@ -725,6 +733,12 @@ class SafeSelfBot(discord.Client):
                             if resp.status == 200:
                                 file = discord.File(io.BytesIO(await resp.read()), filename="action.gif")
                                 await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**", file=file)
+                            else:
+                                # Fallback if image download fails
+                                await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**")
+                else:
+                    # Fallback if API fails completely
+                    await message.channel.send(f"> **{message.author.name}** {cmd}s **{target.name}**")
 
             elif cmd == 'ship':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
