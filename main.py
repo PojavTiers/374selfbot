@@ -20,14 +20,8 @@ print(f"Found {len(TOKENS)} token(s). Starting clients...")
 
 class SafeSelfBot(discord.Client):
     def __init__(self, token_index=0):
-        # THE FIX: We explicitly ask Discord for message content
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.messages = True
-        intents.guilds = True
-        intents.dm_messages = True
-        
-        super().__init__(self_bot=True, intents=intents)
+        # THE FIX: Completely removed Intents. Selfbots don't use them.
+        super().__init__(self_bot=True)
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
@@ -122,7 +116,6 @@ class SafeSelfBot(discord.Client):
             self.rpc_task = asyncio.create_task(self._rpc_rotation_loop())
 
     async def on_message(self, message):
-        # Add a debug print to the Railway logs so we can see if it receives messages
         print(f"Message received: {message.content} from {message.author}")
 
         if message.author == self.user:
