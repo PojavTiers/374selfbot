@@ -87,9 +87,7 @@ class SafeSelfBot(discord.Client):
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
         return text
 
-    # Helper to clean up the mention formatting
     def format_arg(self, message, arg):
-        # If the arg is a mention, try to get the actual username
         if arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
             if message.mentions and message.mentions[0].id == target_id:
@@ -307,14 +305,22 @@ class SafeSelfBot(discord.Client):
         if not message.content.startswith(prefix):
             return
 
-        try:
-            asyncio.create_task(self.delete_command_later(message))
-        except Exception:
-            pass
-
         args = message.content[len(prefix):].strip().split()
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
+
+        # Helper function to handle usage errors (Does NOT delete command)
+        async def usage_error(text):
+            await message.channel.send(f"> **Usage:** `{text}`")
+            return
+
+        # Helper function to handle successful actions (Deletes command)
+        async def success_delete():
+            try:
+                await asyncio.sleep(0.5)
+                await message.delete()
+            except Exception:
+                pass
 
         try:
             if cmd == 'help':
@@ -336,32 +342,35 @@ class SafeSelfBot(discord.Client):
                 help_text = self.generate_help(category, page)
                 new_help_msg = await message.channel.send(help_text)
                 self.help_message_id = new_help_msg.id
+                await success_delete()
 
             # --- UTILITY ---
             elif cmd == 'setprefix':
-                if rest_args:
-                    self.config['prefix'] = rest_args[0]
-                    self.save_config()
-                    await message.channel.send(f"> **Prefix changed to** `{self.config['prefix']}`")
+                if not rest_args:
+                    return await usage_error("-setprefix <char>")
+                self.config['prefix'] = rest_args[0]
+                self.save_config()
+                await message.channel.send(f"> **Prefix changed to** `{self.config['prefix']}`")
+                await success_delete()
 
             elif cmd == 'ping':
                 await message.channel.send(f"> **Ping:** `{round(self.latency * 1000, 2)}ms`")
+                await success_delete()
 
             elif cmd == 'setbio':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-setbio <text>`")
-                    return
+                    return await usage_error("-setbio <text>")
                 bio = " ".join(rest_args)
                 try:
                     await self.user.edit(about_me=bio)
                     await message.channel.send(f"> **Bio changed to** `{bio}`")
+                    await success_delete()
                 except Exception:
                     await message.channel.send("> **Failed to change bio.** Discord may have blocked it.")
 
             elif cmd == 'setstatus':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-setstatus <online/idle/dnd/invisible> [text]`")
-                    return
+                    return await usage_error("-setstatus <online/idle/dnd/invisible> [text]")
                 status_type = rest_args[0].lower()
                 text = " ".join(rest_args[1:]) if len(rest_args) > 1 else None
                 
@@ -376,14 +385,14 @@ class SafeSelfBot(discord.Client):
                     act = discord.CustomActivity(name=text) if text else None
                     await self.change_presence(status=status_map[status_type], activity=act)
                     await message.channel.send(f"> **Status set to** `{status_type}` **with text** `{text if text else 'None'}`")
+                    await success_delete()
                 else:
                     await message.channel.send("> **Invalid status.** Use online, idle, dnd, or invisible.")
 
             elif cmd == 'avatar':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
-                    await message.channel.send("> **Could not find user.**")
-                    return
+                    return await usage_error("-avatar <@user>")
                 avatar_url = target.display_avatar.url if hasattr(target, 'display_avatar') else target.avatar.url
                 async with aiohttp.ClientSession() as session:
                     async with session.get(avatar_url) as resp:
@@ -391,12 +400,12 @@ class SafeSelfBot(discord.Client):
                             img_data = await resp.read()
                             file = discord.File(io.BytesIO(img_data), filename="avatar.png")
                             await message.channel.send(f"> **{target.name}’s Avatar**", file=file)
+                            await success_delete()
 
             elif cmd == 'banner':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
-                    await message.channel.send("> **Could not find user.**")
-                    return
+                    return await usage_error("-banner <@user>")
                 if hasattr(target, 'banner') and target.banner:
                     banner_url = target.banner.url
                     async with aiohttp.ClientSession() as session:
@@ -405,72 +414,79 @@ class SafeSelfBot(discord.Client):
                                 img_data = await resp.read()
                                 file = discord.File(io.BytesIO(img_data), filename="banner.png")
                                 await message.channel.send(f"> **{target.name}’s Banner**", file=file)
+                                await success_delete()
                 else:
                     await message.channel.send("> **User has no banner.**")
 
             elif cmd == 'serverbanner':
                 if not message.guild or not message.guild.banner:
-                    await message.channel.send("> **No server banner.**")
-                    return
+                    return await usage_error("-serverbanner (No server banner)")
                 async with aiohttp.ClientSession() as session:
                     async with session.get(message.guild.banner.url) as resp:
                         if resp.status == 200:
                             file = discord.File(io.BytesIO(await resp.read()), filename="serverbanner.png")
                             await message.channel.send("> **Server Banner**", file=file)
+                            await success_delete()
 
             elif cmd == 'servericon':
                 if not message.guild or not message.guild.icon:
-                    await message.channel.send("> **No server icon.**")
-                    return
+                    return await usage_error("-servericon (No server icon)")
                 async with aiohttp.ClientSession() as session:
                     async with session.get(message.guild.icon.url) as resp:
                         if resp.status == 200:
                             file = discord.File(io.BytesIO(await resp.read()), filename="servericon.png")
                             await message.channel.send("> **Server Icon**", file=file)
+                            await success_delete()
 
             elif cmd == 'snowflake':
                 if not rest_args or not rest_args[0].isdigit():
-                    await message.channel.send("> **Usage:** `-snowflake <ID>`")
-                    return
+                    return await usage_error("-snowflake <ID>")
                 try:
                     timestamp = ((int(rest_args[0]) >> 22) + 1420070400000) / 1000
                     dt = datetime.datetime.fromtimestamp(timestamp)
                     await message.channel.send(f"> **Created on:** `{dt.strftime('%Y-%m-%d %H:%M:%S')}`")
+                    await success_delete()
                 except Exception:
                     await message.channel.send("> **Invalid ID.**")
 
             elif cmd == 'joined':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target and message.guild:
-                    member = message.guild.get_member(target.id)
-                    if member and member.joined_at:
-                        await message.channel.send(f"> **{target.name} joined on:** `{member.joined_at.strftime('%Y-%m-%d')}`")
-                    else:
-                        await message.channel.send("> **User not in server.**")
+                if not target or not message.guild:
+                    return await usage_error("-joined <@user>")
+                member = message.guild.get_member(target.id)
+                if member and member.joined_at:
+                    await message.channel.send(f"> **{target.name} joined on:** `{member.joined_at.strftime('%Y-%m-%d')}`")
+                    await success_delete()
+                else:
+                    await message.channel.send("> **User not in server.**")
 
             elif cmd == 'created':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    await message.channel.send(f"> **{target.name} created account on:** `{target.created_at.strftime('%Y-%m-%d')}`")
+                if not target:
+                    return await usage_error("-created <@user>")
+                await message.channel.send(f"> **{target.name} created account on:** `{target.created_at.strftime('%Y-%m-%d')}`")
+                await success_delete()
 
             elif cmd == 'channelinfo':
                 ch = message.channel
                 await message.channel.send(f"> **Channel:** `{ch.name}`\n> **ID:** `{ch.id}`\n> **NSFW:** `{ch.is_nsfw()}`")
+                await success_delete()
 
             elif cmd == 'invite':
                 if message.guild:
                     try:
                         inv = await message.channel.create_invite(max_age=0, max_uses=0)
                         await message.channel.send(f"> **Invite:** {inv.url}")
+                        await success_delete()
                     except Exception:
                         await message.channel.send("> **Failed to create invite.**")
 
             elif cmd == 'poll':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-poll <question>`")
-                    return
+                    return await usage_error("-poll <question>")
                 question = " ".join(rest_args)
                 msg = await message.channel.send(f"> **Poll:** {question}")
+                await success_delete()
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
                 await asyncio.sleep(10)
@@ -483,8 +499,7 @@ class SafeSelfBot(discord.Client):
             # --- MODERATION ---
             elif cmd == 'purge':
                 if not rest_args or not rest_args[0].isdigit():
-                    await message.channel.send("> **Usage:** `-purge <amount>`")
-                    return
+                    return await usage_error("-purge <amount>")
                 amount = min(int(rest_args[0]), 100) 
                 deleted = 0
                 async for msg in message.channel.history(limit=200):
@@ -499,8 +514,7 @@ class SafeSelfBot(discord.Client):
             elif cmd == 'purgeuser':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
-                    await message.channel.send("> **Could not find user.**")
-                    return
+                    return await usage_error("-purgeuser <@user>")
                 deleted = 0
                 async for msg in message.channel.history(limit=200):
                     if msg.author.id == target.id and deleted < 50:
@@ -538,8 +552,7 @@ class SafeSelfBot(discord.Client):
 
             elif cmd == 'purgecontains':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-purgecontains <text>`")
-                    return
+                    return await usage_error("-purgecontains <text>")
                 text_to_find = " ".join(rest_args).lower()
                 deleted = 0
                 async for msg in message.channel.history(limit=100):
@@ -554,26 +567,25 @@ class SafeSelfBot(discord.Client):
 
             elif cmd == 'dm':
                 if len(rest_args) < 2:
-                    await message.channel.send("> **Usage:** `-dm <@user> <message>`")
-                    return
+                    return await usage_error("-dm <@user> <message>")
                 target = await self.resolve_user(message, rest_args[0])
                 if not target:
-                    await message.channel.send("> **Could not find user.**")
-                    return
+                    return await usage_error("-dm <@user> <message>")
                 text = " ".join(rest_args[1:])
                 try:
                     await target.send(text)
                     await message.channel.send(f"> **Sent DM to** `{target.name}`")
+                    await success_delete()
                 except Exception:
                     await message.channel.send("> **Failed to send DM.**")
 
             elif cmd == 'massdm':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-massdm <msg>`")
-                    return
+                    return await usage_error("-massdm <msg>")
                 text = " ".join(rest_args)
                 sent = 0
-                await message.channel.send("> **Starting Mass DM...**")
+                msg = await message.channel.send("> **Starting Mass DM...**")
+                await success_delete()
                 if message.guild:
                     for member in message.guild.members:
                         if not member.bot and member.id != self.user.id:
@@ -583,13 +595,10 @@ class SafeSelfBot(discord.Client):
                                 await asyncio.sleep(2) 
                             except Exception:
                                 pass
-                await message.channel.send(f"> **Mass DM finished. Sent to** `{sent}` **users.**")
+                await msg.edit(content=f"> **Mass DM finished. Sent to** `{sent}` **users.**")
 
             elif cmd == 'ghostping':
-                try:
-                    await message.delete()
-                except Exception:
-                    pass
+                await success_delete()
                 ping_msg = await message.channel.send(message.author.mention)
                 await asyncio.sleep(1)
                 try:
@@ -601,6 +610,7 @@ class SafeSelfBot(discord.Client):
                 if message.channel.id in self.sniped_messages:
                     content, author, time = self.sniped_messages[message.channel.id]
                     await message.channel.send(f"> **Sniped:** `{content}`\n> **Author:** `{author.name}`")
+                    await success_delete()
                 else:
                     await message.channel.send("> **Nothing to snipe.**")
 
@@ -608,6 +618,7 @@ class SafeSelfBot(discord.Client):
                 if message.channel.id in self.editsniped_messages:
                     before, after, author = self.editsniped_messages[message.channel.id]
                     await message.channel.send(f"> **Before:** `{before}`\n> **After:** `{after}`\n> **Author:** `{author.name}`")
+                    await success_delete()
                 else:
                     await message.channel.send("> **Nothing to edit snipe.**")
 
@@ -616,76 +627,87 @@ class SafeSelfBot(discord.Client):
                     try:
                         await message.reference.resolved.clear_reactions()
                         await message.channel.send("> **Cleared reactions.**")
+                        await success_delete()
                     except Exception:
                         await message.channel.send("> **Failed to clear reactions.**")
 
             elif cmd == 'block':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    try:
-                        await target.block()
-                        await message.channel.send(f"> **Blocked** `{target.name}`")
-                    except Exception:
-                        await message.channel.send("> **Failed to block.**")
+                if not target:
+                    return await usage_error("-block <@user>")
+                try:
+                    await target.block()
+                    await message.channel.send(f"> **Blocked** `{target.name}`")
+                    await success_delete()
+                except Exception:
+                    await message.channel.send("> **Failed to block.**")
 
             elif cmd == 'unblock':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    try:
-                        await target.unblock()
-                        await message.channel.send(f"> **Unblocked** `{target.name}`")
-                    except Exception:
-                        await message.channel.send("> **Failed to unblock.**")
+                if not target:
+                    return await usage_error("-unblock <@user>")
+                try:
+                    await target.unblock()
+                    await message.channel.send(f"> **Unblocked** `{target.name}`")
+                    await success_delete()
+                except Exception:
+                    await message.channel.send("> **Failed to unblock.**")
 
             elif cmd == 'leaveall':
-                await message.channel.send("> **Leaving all servers...**")
+                msg = await message.channel.send("> **Leaving all servers...**")
+                await success_delete()
                 for guild in self.guilds:
                     try:
                         await guild.leave()
                         await asyncio.sleep(1)
                     except Exception:
                         pass
-                await message.channel.send("> **Left all servers.**")
+                await msg.edit(content="> **Left all servers.**")
 
             # --- FUN ---
             elif cmd == 'mock':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-mock <@user>`")
-                    return
+                    return await usage_error("-mock <@user>")
                 target = await self.resolve_user(message, rest_args[0])
-                if target:
-                    self.auto_mocks[str(target.id)] = True
-                    await message.channel.send(f"> **Mocking {target.name}**")
+                if not target:
+                    return await usage_error("-mock <@user>")
+                self.auto_mocks[str(target.id)] = True
+                await message.channel.send(f"> **Mocking {target.name}**")
+                await success_delete()
 
             elif cmd == 'react':
                 if len(rest_args) < 2:
-                    await message.channel.send("> **Usage:** `-react <@user> <emoji>`")
-                    return
+                    return await usage_error("-react <@user> <emoji>")
                 target = await self.resolve_user(message, rest_args[0])
                 emoji = rest_args[1]
-                if target:
-                    self.auto_reacts[str(target.id)] = [emoji]
-                    await message.channel.send(f"> **Reacting to {target.name} with {emoji}**")
+                if not target:
+                    return await usage_error("-react <@user> <emoji>")
+                self.auto_reacts[str(target.id)] = [emoji]
+                await message.channel.send(f"> **Reacting to {target.name} with {emoji}**")
+                await success_delete()
 
             elif cmd == 'stopmock':
                 self.auto_mocks.clear()
                 await message.channel.send("> **Stopped mocking.**")
+                await success_delete()
 
             elif cmd == 'stopreact':
                 self.auto_reacts.clear()
                 await message.channel.send("> **Stopped reacting.**")
+                await success_delete()
 
             elif cmd == 'stop':
                 self.auto_mocks.clear()
                 self.auto_reacts.clear()
                 await message.channel.send("> **Stopped all.**")
+                await success_delete()
 
             elif cmd == 'spam':
-                if len(rest_args) < 2:
-                    await message.channel.send("> **Usage:** `-spam <amount> <msg>`")
-                    return
-                amount = min(int(rest_args[0]), 10) if rest_args[0].isdigit() else 0
+                if len(rest_args) < 2 or not rest_args[0].isdigit():
+                    return await usage_error("-spam <amount> <msg>")
+                amount = min(int(rest_args[0]), 10)
                 text = " ".join(rest_args[1:])
+                await success_delete()
                 for _ in range(amount):
                     await message.channel.send(text)
                     await asyncio.sleep(1)
@@ -693,34 +715,40 @@ class SafeSelfBot(discord.Client):
 
             elif cmd == 'uwuify':
                 if not rest_args:
-                    return
+                    return await usage_error("-uwuify <text>")
                 text = " ".join(rest_args)
                 uwu = text.replace("r", "w").replace("l", "w").replace("R", "W").replace("L", "W") + " uwu"
                 await message.channel.send(f"> {uwu}")
+                await success_delete()
 
             elif cmd == 'reverse':
                 if not rest_args:
-                    return
+                    return await usage_error("-reverse <text>")
                 await message.channel.send(f"> `{rest_args[0][::-1]}`")
+                await success_delete()
 
             elif cmd == 'ascii':
                 if not rest_args:
-                    return
+                    return await usage_error("-ascii <text>")
                 ascii_out = " ".join([f":regional_indicator_{c.lower()}:" for c in " ".join(rest_args) if c.isalpha()])
                 await message.channel.send(f"> {ascii_out[:2000] if ascii_out else 'No letters.'}")
+                await success_delete()
 
             elif cmd == '8ball':
                 if not rest_args:
-                    return
+                    return await usage_error("-8ball <question>")
                 responses = ["Yes.", "No.", "Maybe.", "Definitely.", "Absolutely not.", "Ask again later."]
                 await message.channel.send(f"> **Question:** {(' '.join(rest_args))}\n> **Answer:** `{random.choice(responses)}`")
+                await success_delete()
 
             elif cmd == 'coinflip':
                 await message.channel.send(f"> **Result:** `{random.choice(['Heads', 'Tails'])}`")
+                await success_delete()
 
             elif cmd == 'roll':
                 max_num = int(rest_args[0]) if rest_args and rest_args[0].isdigit() else 6
                 await message.channel.send(f"> **Rolled:** `{random.randint(1, max_num)}`")
+                await success_delete()
 
             elif cmd == 'meme':
                 async with aiohttp.ClientSession() as session:
@@ -728,12 +756,12 @@ class SafeSelfBot(discord.Client):
                         if resp.status == 200:
                             data = await resp.json()
                             await message.channel.send(f"> **{data['title']}**\n{data['url']}")
+                            await success_delete()
 
             elif cmd in ['hug', 'slap', 'kiss', 'pat']:
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
-                    await message.channel.send("> **Could not find user.**")
-                    return
+                    return await usage_error(f"-{cmd} <@user>")
                 
                 output_msg = f"> {message.author.mention} `{cmd}s` {target.mention}"
                 
@@ -748,100 +776,122 @@ class SafeSelfBot(discord.Client):
                                 await message.channel.send(output_msg)
                 else:
                     await message.channel.send(output_msg)
+                await success_delete()
 
             elif cmd == 'ship':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    pct = random.randint(1, 100)
-                    await message.channel.send(f"> **{message.author.name} + {target.name} = {pct}%**")
+                if not target:
+                    return await usage_error("-ship <@user>")
+                pct = random.randint(1, 100)
+                await message.channel.send(f"> **{message.author.name} + {target.name} = {pct}%**")
+                await success_delete()
 
             elif cmd == 'iq':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    await message.channel.send(f"> **{target.name}'s IQ is** `{random.randint(1, 200)}`")
+                if not target:
+                    return await usage_error("-iq <@user>")
+                await message.channel.send(f"> **{target.name}'s IQ is** `{random.randint(1, 200)}`")
+                await success_delete()
 
             elif cmd == 'rate':
                 if not rest_args:
-                    return
-                # Clean up the argument if it's a ping
+                    return await usage_error("-rate <text or @user>")
                 cleaned_arg = self.format_arg(message, rest_args[0])
                 await message.channel.send(f"> **Rating** `{cleaned_arg}`: **{random.randint(1, 10)}/10**")
+                await success_delete()
 
             # --- INFO ---
             elif cmd == 'userinfo':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    info_text = (
-                        f"> **User:** `{target.name}`\n"
-                        f"> **ID:** `{target.id}`\n"
-                        f"> **Created:** `{target.created_at.strftime('%Y-%m-%d')}`"
-                    )
-                    await message.channel.send(info_text)
+                if not target:
+                    return await usage_error("-userinfo <@user>")
+                info_text = (
+                    f"> **User:** `{target.name}`\n"
+                    f"> **ID:** `{target.id}`\n"
+                    f"> **Created:** `{target.created_at.strftime('%Y-%m-%d')}`"
+                )
+                await message.channel.send(info_text)
+                await success_delete()
 
             elif cmd == 'botinfo':
                 await message.channel.send(f"> **374 SelfBot**\n> **Ping:** `{round(self.latency * 1000, 2)}ms`\n> **Python:** `3.9+`\n> **Library:** `discord.py-self`")
+                await success_delete()
 
             elif cmd == 'uptime':
                 await message.channel.send("> **Bot has been running since deployment.**")
+                await success_delete()
 
             elif cmd == 'status':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    await message.channel.send(f"> **{target.name}'s status is** `{target.status}`")
+                if not target:
+                    return await usage_error("-status <@user>")
+                await message.channel.send(f"> **{target.name}'s status is** `{target.status}`")
+                await success_delete()
 
             elif cmd == 'about':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target and hasattr(target, 'bio'):
+                if not target:
+                    return await usage_error("-about <@user>")
+                if hasattr(target, 'bio'):
                     await message.channel.send(f"> **{target.name}'s bio:** `{target.bio if target.bio else 'None'}`")
+                    await success_delete()
 
             elif cmd == 'connections':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
-                if target:
-                    try:
-                        conns = await target.connections()
-                        if conns:
-                            await message.channel.send(f"> **{target.name} has {len(conns)} connections.**")
-                        else:
-                            await message.channel.send(f"> **{target.name} has no connections.**")
-                    except Exception:
-                        await message.channel.send("> **Failed to fetch connections.**")
+                if not target:
+                    return await usage_error("-connections <@user>")
+                try:
+                    conns = await target.connections()
+                    if conns:
+                        await message.channel.send(f"> **{target.name} has {len(conns)} connections.**")
+                    else:
+                        await message.channel.send(f"> **{target.name} has no connections.**")
+                    await success_delete()
+                except Exception:
+                    await message.channel.send("> **Failed to fetch connections.**")
 
             elif cmd == 'guilds':
                 guilds = [g.name for g in self.guilds]
                 await message.channel.send(f"> **You are in {len(guilds)} servers.**\n> `{', '.join(guilds)[:1000]}`")
+                await success_delete()
 
             elif cmd == 'blocked':
                 try:
                     blocked = await self.fetch_blocked_users()
                     await message.channel.send(f"> **You have blocked {len(blocked)} users.**")
+                    await success_delete()
                 except Exception:
                     await message.channel.send("> **Failed to fetch blocked users.**")
 
             # --- RPC ---
             elif cmd == 'rpc':
                 if not rest_args:
-                    await message.channel.send("> **Usage:** `-rpc <playing/watching/listening/streaming> <text> [url]`")
-                    return
+                    return await usage_error("-rpc <playing/watching/listening/streaming/image> <text/url>")
                 rtype = rest_args[0].lower()
                 text = rest_args[1] if len(rest_args) > 1 else ""
                 
                 if rtype in ['playing', 'watching', 'listening']:
+                    if not text:
+                        return await usage_error(f"-rpc {rtype} <text>")
                     act = discord.Activity(type=getattr(discord.ActivityType, rtype), name=text)
                     self.current_rpc = act
                     await self.change_presence(activity=act)
                     await message.channel.send(f"> **RPC set to** `{rtype}` **{text}**")
+                    await success_delete()
                 
-                elif rtype == 'streaming' and len(rest_args) >= 3:
+                elif rtype == 'streaming':
+                    if len(rest_args) < 3:
+                        return await usage_error("-rpc streaming <text> <url>")
                     url = rest_args[2]
                     act = discord.Streaming(name=text, url=url)
                     self.current_rpc = act
                     await self.change_presence(activity=act)
                     await message.channel.send(f"> **RPC set to streaming** `{text}`")
+                    await success_delete()
 
                 elif rtype == 'image':
                     if not rest_args[1:]:
-                        await message.channel.send("> **Usage:** `-rpc image <url>`")
-                        return
+                        return await usage_error("-rpc image <url>")
                     img_url = rest_args[1]
                     
                     if self.current_rpc:
@@ -853,21 +903,16 @@ class SafeSelfBot(discord.Client):
                         self.current_rpc = act
                         await self.change_presence(activity=act)
                         await message.channel.send("> **Created new RPC with image.**")
+                    await success_delete()
 
             elif cmd == 'clearrpc':
                 self.current_rpc = None
                 await self.change_presence(activity=None)
                 await message.channel.send("> **RPC cleared.**")
+                await success_delete()
 
         except Exception as e:
             await message.channel.send(f"> **Error:** `{str(e)}`")
-
-    async def delete_command_later(self, message):
-        await asyncio.sleep(0.5)
-        try:
-            await message.delete()
-        except Exception:
-            pass
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
