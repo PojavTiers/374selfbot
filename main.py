@@ -75,16 +75,36 @@ class SafeSelfBot(discord.Client):
         if not before.author.bot and before.guild and before.content != after.content:
             self.editsniped_messages[before.channel.id] = (before.content, after.content, before.author)
 
+    # --- ADVANCED MOCK FILTER ---
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
             return text
+        
+        # 1. Remove harmful symbols
+        text = re.sub(r'[,+\-!\.\$]', '', text)
+        
+        # 2. Replace English numbers with 99
+        number_words = [
+            "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+            "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
+            "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+            "eighty", "ninety", "hundred", "thousand"
+        ]
+        for word in number_words:
+            text = re.sub(rf'\b{word}\b', '99', text, flags=re.IGNORECASE)
+
+        # 3. Replace digits below 13 with 99 (Original logic)
         def replace_number(match):
             num = int(match.group())
             return "99" if num < 13 else match.group()
         text = re.sub(r'\b\d+\b', replace_number, text)
-        text = re.sub(r'underage', 'overage', text, flags=re.IGNORECASE)
+        
+        # 4. Replace specific words
+        text = re.sub(r'\bunderage\b', 'overage', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bam\b', 'you', text, flags=re.IGNORECASE)
         text = re.sub(r'\bi\b', 'you', text, flags=re.IGNORECASE)
         text = re.sub(r'\bme\b', 'you', text, flags=re.IGNORECASE)
+        
         return text
 
     def format_arg(self, message, arg):
@@ -142,11 +162,12 @@ class SafeSelfBot(discord.Client):
                 print(f"GIF API Error: {e}")
         return None
 
+    # --- CLEAN INI HELP MENU (NO ANSI) ---
     def generate_help(self, category=None, page=1):
         prefix = self.config.get('prefix', '-')
         
         if category is None:
-            header = "```ansi\n\u001b[1;36m374 SelfBot | Main Menu\u001b[0m\n\u001b[0;37mPage 1 of 1\u001b[0m\n```"
+            header = "```ini\n[ 374 SelfBot | Main Menu ]\nPage 1 of 1\n```"
             body = (
                 "```ini\n"
                 f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setbio\n"
@@ -156,7 +177,7 @@ class SafeSelfBot(discord.Client):
                 f"[ RPC ] - {prefix}rpc playing, {prefix}rpc image\n"
                 "```"
             )
-            footer = f"```ansi\n\u001b[2;30mType {prefix}help <category> to view commands. (e.g. {prefix}help fun)\u001b[0m\n```"
+            footer = f"```ini\nType {prefix}help <category> to view commands.\n```"
             return f"{header}\n{body}\n{footer}"
 
         categories = {
@@ -246,9 +267,9 @@ class SafeSelfBot(discord.Client):
         page_cmds = cmds[start_idx:end_idx]
 
         header = (
-            "```ansi\n"
-            f"\u001b[1;36m374 SelfBot | {cat_lower.capitalize()} Commands\u001b[0m\n"
-            f"\u001b[0;37mPage {page} of {total_pages}\u001b[0m\n"
+            "```ini\n"
+            f"[ 374 SelfBot | {cat_lower.capitalize()} Commands ]\n"
+            f"Page {page} of {total_pages}\n"
             "```"
         )
 
@@ -269,7 +290,7 @@ class SafeSelfBot(discord.Client):
         else:
             footer_text = f"Type {prefix}help to go back to main menu."
 
-        footer = f"```ansi\n\u001b[2;30m{footer_text}\u001b[0m\n```"
+        footer = f"```ini\n{footer_text}\n```"
 
         return f"{header}\n{body}\n{footer}"
 
@@ -295,6 +316,7 @@ class SafeSelfBot(discord.Client):
                         pass
             
             if str(message.author.id) in self.auto_mocks:
+                # Now uses the advanced filter
                 safe_text = self.bypass_text(message.content)
                 if safe_text.strip(): 
                     await message.channel.send(safe_text)
@@ -309,12 +331,10 @@ class SafeSelfBot(discord.Client):
         cmd = args[0].lower() if args else ""
         rest_args = args[1:]
 
-        # Helper function to handle usage errors (Does NOT delete command)
         async def usage_error(text):
             await message.channel.send(f"> **Usage:** `{text}`")
             return
 
-        # Helper function to handle successful actions (Deletes command)
         async def success_delete():
             try:
                 await asyncio.sleep(0.5)
