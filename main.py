@@ -37,6 +37,11 @@ class SafeSelfBot(discord.Client):
         self.editsniped_messages = {}
         self.current_rpc = None
         self.help_message_id = None 
+        
+        # AFK SYSTEM VARIABLES
+        self.afk_reason = None
+        self.afk_time = None
+        self.afk_cooldowns = {} # Tracks who got the auto-reply recently
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -75,15 +80,12 @@ class SafeSelfBot(discord.Client):
         if not before.author.bot and before.guild and before.content != after.content:
             self.editsniped_messages[before.channel.id] = (before.content, after.content, before.author)
 
-    # --- ADVANCED MOCK FILTER ---
     def bypass_text(self, text):
         if not self.config.get('safe_mode'):
             return text
         
-        # 1. Remove harmful symbols
         text = re.sub(r'[,+\-!\.\$]', '', text)
         
-        # 2. Replace English numbers with 99
         number_words = [
             "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
             "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen",
@@ -93,13 +95,11 @@ class SafeSelfBot(discord.Client):
         for word in number_words:
             text = re.sub(rf'\b{word}\b', '99', text, flags=re.IGNORECASE)
 
-        # 3. Replace digits below 13 with 99 (Original logic)
         def replace_number(match):
             num = int(match.group())
             return "99" if num < 13 else match.group()
         text = re.sub(r'\b\d+\b', replace_number, text)
         
-        # 4. Replace specific words
         text = re.sub(r'\bunderage\b', 'overage', text, flags=re.IGNORECASE)
         text = re.sub(r'\bam\b', 'you', text, flags=re.IGNORECASE)
         text = re.sub(r'\bi\b', 'you', text, flags=re.IGNORECASE)
@@ -162,7 +162,6 @@ class SafeSelfBot(discord.Client):
                 print(f"GIF API Error: {e}")
         return None
 
-    # --- CLEAN INI HELP MENU (NO ANSI) ---
     def generate_help(self, category=None, page=1):
         prefix = self.config.get('prefix', '-')
         
@@ -170,7 +169,7 @@ class SafeSelfBot(discord.Client):
             header = "```ini\n[ 374 SelfBot | Main Menu ]\nPage 1 of 1\n```"
             body = (
                 "```ini\n"
-                f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setbio\n"
+                f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setbio, {prefix}afk\n"
                 f"[ MODERATION ] - {prefix}purge, {prefix}dm, {prefix}leaveall\n"
                 f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}hug, {prefix}8ball\n"
                 f"[ INFO ] - {prefix}userinfo, {prefix}snowflake\n"
@@ -188,6 +187,7 @@ class SafeSelfBot(discord.Client):
                 {"cmd": f"{prefix}banner <@user>", "desc": "Get user's profile banner"},
                 {"cmd": f"{prefix}setbio <text>", "desc": "Change your profile bio"},
                 {"cmd": f"{prefix}setstatus <status> [text]", "desc": "Change status and text"},
+                {"cmd": f"{prefix}afk [reason]", "desc": "Set AFK status with auto-reply"},
                 {"cmd": f"{prefix}serverbanner", "desc": "Get server banner"},
                 {"cmd": f"{prefix}servericon", "desc": "Get server icon"},
                 {"cmd": f"{prefix}snowflake <ID>", "desc": "Get creation date of an ID"},
@@ -307,6 +307,31 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
+        # --- AFK AUTO REPLY SYSTEM ---
+        if message.author.id != self.user.id and not message.guild:
+            # Only triggers in DMs
+            if self.afk_reason:
+                cooldown_key = str(message.author.id)
+                current_time = datetime.datetime.now().timestamp()
+                
+                # 10-second cooldown check
+                if cooldown_key not in self.afk_cooldowns or (current_time - self.afk_cooldowns[cooldown_key]) > 10:
+                    afk_msg = (
+                        f"> **AFK:** {self.afk_reason}\n"
+                        f"> {self.afk_time}"
+                    )
+                    await message.channel.send(afk_msg)
+                    self.afk_cooldowns[cooldown_key] = current_time
+            return # Stop processing DMs further
+
+        # --- REMOVE AFK IF SELF BOT TYPES ---
+        if message.author.id == self.user.id and self.afk_reason is not None:
+            # Ignore if the message is just the -afk command setting it
+            is_afk_cmd = message.content.lower().startswith(f"{self.config.get('prefix', '-')}afk")
+            if not is_afk_cmd:
+                self.afk_reason = None
+                self.afk_time = None
+
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -316,7 +341,6 @@ class SafeSelfBot(discord.Client):
                         pass
             
             if str(message.author.id) in self.auto_mocks:
-                # Now uses the advanced filter
                 safe_text = self.bypass_text(message.content)
                 if safe_text.strip(): 
                     await message.channel.send(safe_text)
@@ -408,6 +432,15 @@ class SafeSelfBot(discord.Client):
                     await success_delete()
                 else:
                     await message.channel.send("> **Invalid status.** Use online, idle, dnd, or invisible.")
+
+            # --- NEW AFK COMMAND ---
+            elif cmd == 'afk':
+                reason = " ".join(rest_args) if rest_args else "i'm afk, ill let you know when I'm back"
+                self.afk_reason = reason
+                self.afk_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                
+                await message.channel.send(f"> **AFK set:** `{reason}`")
+                await success_delete()
 
             elif cmd == 'avatar':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
