@@ -89,21 +89,27 @@ class SafeSelfBot(discord.Client):
         
         return text
 
+    def format_arg(self, message, arg):
+        if arg.startswith('<@') and arg.endswith('>'):
+            target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
+            if message.mentions and message.mentions[0].id == target_id:
+                return f"@{message.mentions[0].name}"
+            if target_id in self.cached_users:
+                return f"@{self.cached_users[target_id].name}"
+        return arg
+
     async def resolve_user(self, message, arg):
-        # 1. Check mentions first
         if message.mentions:
             user = message.mentions[0]
             self.cached_users[user.id] = user
             return user
             
-        # 2. Check if it's a reply
         if message.reference and message.reference.resolved:
             if isinstance(message.reference.resolved, discord.Message):
                 user = message.reference.resolved.author
                 self.cached_users[user.id] = user
                 return user
                 
-        # 3. Check by ID
         target_id = None
         if arg and arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
@@ -119,6 +125,25 @@ class SafeSelfBot(discord.Client):
                 return user
             except Exception:
                 return None
+        return None
+
+    async def get_anime_gif(self, category):
+        endpoint_map = {
+            'hug': 'hug',
+            'slap': 'slap',
+            'kiss': 'kiss',
+            'pat': 'pat'
+        }
+        endpoint = endpoint_map.get(category, 'hug')
+        
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(f"https://nekos.best/api/v2/{endpoint}") as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return data['results'][0]['url']
+            except Exception as e:
+                print(f"GIF API Error: {e}")
         return None
 
     def generate_help(self, category=None, page=1):
@@ -267,21 +292,18 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AUTO REACT & MOCK (RUNS FOR EVERYONE, DMS & SERVERS) ---
-        if message.author.id != self.user.id:
-            # React
-            if str(message.author.id) in self.auto_reacts:
-                for emoji in self.auto_reacts[str(message.author.id)]:
-                    try:
-                        await message.add_reaction(emoji)
-                    except Exception as e:
-                        print(f"Failed to react: {e}")
-            
-            # Mock
-            if str(message.author.id) in self.auto_mocks:
-                safe_text = self.bypass_text(message.content)
-                if safe_text.strip(): 
-                    await message.channel.send(safe_text)
+        # --- AUTO REACT & MOCK (RUNS FOR EVERYONE, INCLUDING YOURSELF) ---
+        if str(message.author.id) in self.auto_reacts:
+            for emoji in self.auto_reacts[str(message.author.id)]:
+                try:
+                    await message.add_reaction(emoji)
+                except Exception as e:
+                    print(f"Failed to react: {e}")
+        
+        if str(message.author.id) in self.auto_mocks:
+            safe_text = self.bypass_text(message.content)
+            if safe_text.strip(): 
+                await message.channel.send(safe_text)
 
         # --- AFK AUTO REPLY SYSTEM (DMS ONLY) ---
         if message.author.id != self.user.id and not message.guild:
@@ -297,7 +319,7 @@ class SafeSelfBot(discord.Client):
                     await message.channel.send(afk_msg)
                     self.afk_cooldowns[cooldown_key] = current_time
 
-        # --- STOP PROCESSING IF NOT US ---
+        # --- STOP PROCESSING COMMANDS IF NOT US ---
         if message.author.id != self.user.id:
             return 
 
@@ -969,34 +991,6 @@ class SafeSelfBot(discord.Client):
 
         except Exception as e:
             await message.channel.send(f"> **Error:** `{str(e)}`")
-
-    async def get_anime_gif(self, category):
-        endpoint_map = {
-            'hug': 'hug',
-            'slap': 'slap',
-            'kiss': 'kiss',
-            'pat': 'pat'
-        }
-        endpoint = endpoint_map.get(category, 'hug')
-        
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(f"https://nekos.best/api/v2/{endpoint}") as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data['results'][0]['url']
-            except Exception as e:
-                print(f"GIF API Error: {e}")
-        return None
-
-    def format_arg(self, message, arg):
-        if arg.startswith('<@') and arg.endswith('>'):
-            target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
-            if message.mentions and message.mentions[0].id == target_id:
-                return f"@{message.mentions[0].name}"
-            if target_id in self.cached_users:
-                return f"@{self.cached_users[target_id].name}"
-        return arg
 
 def run_all_clients():
     clients = [SafeSelfBot(token_index=i) for i in range(len(TOKENS))]
