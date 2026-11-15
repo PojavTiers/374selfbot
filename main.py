@@ -28,7 +28,7 @@ class SafeSelfBot(discord.Client):
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
-        self.auto_reacts = {}
+        self.auto_reacts = {} # Format: {user_id: [emoji1, emoji2]}
         self.auto_mocks = {} 
         self.cached_users = {} 
         self.processed_messages = set()
@@ -38,7 +38,6 @@ class SafeSelfBot(discord.Client):
         self.current_rpc = None
         self.help_message_id = None 
         
-        # AFK SYSTEM VARIABLES
         self.afk_reason = None
         self.afk_time = None
         self.afk_cooldowns = {} 
@@ -308,7 +307,7 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AFK AUTO REPLY SYSTEM ---
+        # --- AFK AUTO REPLY SYSTEM (DM ONLY) ---
         if message.author.id != self.user.id and not message.guild:
             if self.afk_reason:
                 cooldown_key = str(message.author.id)
@@ -330,6 +329,7 @@ class SafeSelfBot(discord.Client):
                 self.afk_reason = None
                 self.afk_time = None
 
+        # --- AUTO REACT & MOCK FOR OTHERS (WORKS IN DMS AND SERVERS) ---
         if message.author.id != self.user.id:
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
@@ -765,7 +765,13 @@ class SafeSelfBot(discord.Client):
                 emoji = rest_args[1]
                 if not target:
                     return await usage_error("-react <@user> <emoji>")
-                self.auto_reacts[str(target.id)] = [emoji]
+                
+                # THE FIX: Appends to list instead of overwriting
+                uid = str(target.id)
+                self.auto_reacts.setdefault(uid, [])
+                if emoji not in self.auto_reacts[uid]:
+                    self.auto_reacts[uid].append(emoji)
+                    
                 await message.channel.send(f"> **Reacting to {target.name} with {emoji}**")
                 await success_delete()
 
