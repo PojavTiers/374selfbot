@@ -41,7 +41,7 @@ class SafeSelfBot(discord.Client):
         # AFK SYSTEM VARIABLES
         self.afk_reason = None
         self.afk_time = None
-        self.afk_cooldowns = {} # Tracks who got the auto-reply recently
+        self.afk_cooldowns = {} 
 
     def load_config(self):
         if os.path.exists(CONFIG_FILE):
@@ -169,7 +169,7 @@ class SafeSelfBot(discord.Client):
             header = "```ini\n[ 374 SelfBot | Main Menu ]\nPage 1 of 1\n```"
             body = (
                 "```ini\n"
-                f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}setbio, {prefix}afk\n"
+                f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}afk, {prefix}history\n"
                 f"[ MODERATION ] - {prefix}purge, {prefix}dm, {prefix}leaveall\n"
                 f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}hug, {prefix}8ball\n"
                 f"[ INFO ] - {prefix}userinfo, {prefix}snowflake\n"
@@ -188,6 +188,7 @@ class SafeSelfBot(discord.Client):
                 {"cmd": f"{prefix}setbio <text>", "desc": "Change your profile bio"},
                 {"cmd": f"{prefix}setstatus <status> [text]", "desc": "Change status and text"},
                 {"cmd": f"{prefix}afk [reason]", "desc": "Set AFK status with auto-reply"},
+                {"cmd": f"{prefix}history <@user>", "desc": "Gathers all safe public info"},
                 {"cmd": f"{prefix}serverbanner", "desc": "Get server banner"},
                 {"cmd": f"{prefix}servericon", "desc": "Get server icon"},
                 {"cmd": f"{prefix}snowflake <ID>", "desc": "Get creation date of an ID"},
@@ -309,12 +310,10 @@ class SafeSelfBot(discord.Client):
 
         # --- AFK AUTO REPLY SYSTEM ---
         if message.author.id != self.user.id and not message.guild:
-            # Only triggers in DMs
             if self.afk_reason:
                 cooldown_key = str(message.author.id)
                 current_time = datetime.datetime.now().timestamp()
                 
-                # 10-second cooldown check
                 if cooldown_key not in self.afk_cooldowns or (current_time - self.afk_cooldowns[cooldown_key]) > 10:
                     afk_msg = (
                         f"> **AFK:** {self.afk_reason}\n"
@@ -322,11 +321,10 @@ class SafeSelfBot(discord.Client):
                     )
                     await message.channel.send(afk_msg)
                     self.afk_cooldowns[cooldown_key] = current_time
-            return # Stop processing DMs further
+            return 
 
         # --- REMOVE AFK IF SELF BOT TYPES ---
         if message.author.id == self.user.id and self.afk_reason is not None:
-            # Ignore if the message is just the -afk command setting it
             is_afk_cmd = message.content.lower().startswith(f"{self.config.get('prefix', '-')}afk")
             if not is_afk_cmd:
                 self.afk_reason = None
@@ -433,7 +431,6 @@ class SafeSelfBot(discord.Client):
                 else:
                     await message.channel.send("> **Invalid status.** Use online, idle, dnd, or invisible.")
 
-            # --- NEW AFK COMMAND ---
             elif cmd == 'afk':
                 reason = " ".join(rest_args) if rest_args else "i'm afk, ill let you know when I'm back"
                 self.afk_reason = reason
@@ -441,6 +438,39 @@ class SafeSelfBot(discord.Client):
                 
                 await message.channel.send(f"> **AFK set:** `{reason}`")
                 await success_delete()
+
+            elif cmd == 'history':
+                target = await self.resolve_user(message, rest_args[0] if rest_args else None)
+                if not target:
+                    return await usage_error("-history <@user>")
+                
+                msg = await message.channel.send("> **Gathering history...**")
+                await success_delete()
+                
+                hist_text = (
+                    f"```ini\n"
+                    f"[ USER HISTORY: {target.name} ]\n\n"
+                    f"ID: {target.id}\n"
+                    f"Account Created: {target.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    f"Bot Account: {target.bot}\n"
+                    f"System Account: {target.system}\n"
+                    f"Default Avatar: {target.default_avatar}\n"
+                )
+                
+                if message.guild:
+                    member = message.guild.get_member(target.id)
+                    if member:
+                        hist_text += f"Joined Server: {member.joined_at.strftime('%Y-%m-%d %H:%M:%S') if member.joined_at else 'Unknown'}\n"
+                        if member.premium_since:
+                            hist_text += f"Boosting Since: {member.premium_since.strftime('%Y-%m-%d')}\n"
+                        if member.nick:
+                            hist_text += f"Server Nickname: {member.nick}\n"
+                        roles = [r.name for r in member.roles if r.name != "@everyone"]
+                        if roles:
+                            hist_text += f"Roles: {', '.join(roles[:10])}{'...' if len(roles)>10 else ''}\n"
+                
+                hist_text += "```"
+                await msg.edit(content=hist_text)
 
             elif cmd == 'avatar':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
