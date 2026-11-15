@@ -28,7 +28,7 @@ class SafeSelfBot(discord.Client):
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
-        self.auto_reacts = {} # Tracks up to 5 users
+        self.auto_reacts = {} # Format: {user_id: [emoji1, emoji2]}
         self.auto_mocks = {} 
         self.cached_users = {} 
         self.processed_messages = set()
@@ -116,12 +116,20 @@ class SafeSelfBot(discord.Client):
         return arg
 
     async def resolve_user(self, message, arg):
+        # 1. Check mentions first (works in servers and DMs)
         if message.mentions:
-            return message.mentions[0]
+            user = message.mentions[0]
+            self.cached_users[user.id] = user
+            return user
+            
+        # 2. Check if it's a reply
         if message.reference and message.reference.resolved:
             if isinstance(message.reference.resolved, discord.Message):
-                return message.reference.resolved.author
+                user = message.reference.resolved.author
+                self.cached_users[user.id] = user
+                return user
                 
+        # 3. Check by ID
         target_id = None
         if arg and arg.startswith('<@') and arg.endswith('>'):
             target_id = int(arg.replace('<@', '').replace('>', '').replace('!', ''))
@@ -131,13 +139,11 @@ class SafeSelfBot(discord.Client):
         if target_id:
             if target_id in self.cached_users:
                 return self.cached_users[target_id]
-            if message.guild:
-                member = message.guild.get_member(target_id)
-                if member:
-                    self.cached_users[target_id] = member
-                    return member
+            # Try to fetch from API if not in cache
             try:
-                return await self.fetch_user(target_id)
+                user = await self.fetch_user(target_id)
+                self.cached_users[user.id] = user
+                return user
             except Exception:
                 return None
         return None
@@ -331,12 +337,13 @@ class SafeSelfBot(discord.Client):
 
         # --- AUTO REACT & MOCK FOR OTHERS (WORKS IN DMS AND SERVERS) ---
         if message.author.id != self.user.id:
+            # We check if this user is in the auto_reacts dict
             if str(message.author.id) in self.auto_reacts:
                 for emoji in self.auto_reacts[str(message.author.id)]:
                     try:
                         await message.add_reaction(emoji)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Failed to react: {e}")
             
             if str(message.author.id) in self.auto_mocks:
                 safe_text = self.bypass_text(message.content)
