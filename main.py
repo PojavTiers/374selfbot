@@ -28,7 +28,7 @@ class SafeSelfBot(discord.Client):
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
-        self.auto_reacts = {} # Format: {user_id: [emoji1, emoji2]}
+        self.auto_reacts = {} # Tracks up to 5 users
         self.auto_mocks = {} 
         self.cached_users = {} 
         self.processed_messages = set()
@@ -307,7 +307,7 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AFK AUTO REPLY SYSTEM (DM ONLY) ---
+        # --- AFK AUTO REPLY SYSTEM (WORKS IN DMS) ---
         if message.author.id != self.user.id and not message.guild:
             if self.afk_reason:
                 cooldown_key = str(message.author.id)
@@ -766,13 +766,17 @@ class SafeSelfBot(discord.Client):
                 if not target:
                     return await usage_error("-react <@user> <emoji>")
                 
-                # THE FIX: Appends to list instead of overwriting
+                # THE FIX: Tracks up to 5 separate users
                 uid = str(target.id)
+                if len(self.auto_reacts) >= 5 and uid not in self.auto_reacts:
+                    await message.channel.send("> **Limit reached.** You can only auto-react to 5 users at a time.")
+                    return
+
                 self.auto_reacts.setdefault(uid, [])
                 if emoji not in self.auto_reacts[uid]:
                     self.auto_reacts[uid].append(emoji)
                     
-                await message.channel.send(f"> **Reacting to {target.name} with {emoji}**")
+                await message.channel.send(f"> reacting {target.mention} with {emoji}")
                 await success_delete()
 
             elif cmd == 'stopmock':
