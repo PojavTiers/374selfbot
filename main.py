@@ -765,13 +765,29 @@ class SafeSelfBot(discord.Client):
                 await success_delete()
 
             elif cmd == 'stopmock':
-                self.auto_mocks.clear()
-                await message.channel.send("> **Stopped mocking.**")
+                if not rest_args:
+                    self.auto_mocks.clear()
+                    await message.channel.send("> **Stopped mocking all users.**")
+                else:
+                    target = await self.resolve_user(message, rest_args[0])
+                    if target and str(target.id) in self.auto_mocks:
+                        del self.auto_mocks[str(target.id)]
+                        await message.channel.send(f"> **Stopped mocking {target.name}.**")
+                    else:
+                        await message.channel.send("> **That user is not being mocked.**")
                 await success_delete()
 
             elif cmd == 'stopreact':
-                self.auto_reacts.clear()
-                await message.channel.send("> **Stopped reacting.**")
+                if not rest_args:
+                    self.auto_reacts.clear()
+                    await message.channel.send("> **Stopped reacting to all users.**")
+                else:
+                    target = await self.resolve_user(message, rest_args[0])
+                    if target and str(target.id) in self.auto_reacts:
+                        del self.auto_reacts[str(target.id)]
+                        await message.channel.send(f"> **Stopped reacting to {target.name}.**")
+                    else:
+                        await message.channel.send("> **That user is not being reacted to.**")
                 await success_delete()
 
             elif cmd == 'stop':
