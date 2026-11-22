@@ -323,20 +323,8 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AUTO REACT & MOCK (RUNS FOR EVERYONE) ---
-        if str(message.author.id) in self.auto_reacts:
-            for emoji in self.auto_reacts[str(message.author.id)]:
-                try:
-                    await message.add_reaction(emoji)
-                except Exception as e:
-                    print(f"Failed to react: {e}")
-        
-        if str(message.author.id) in self.auto_mocks:
-            safe_text = self.bypass_text(message.content)
-            if safe_text.strip(): 
-                await message.channel.send(safe_text)
-
-        # --- AFK AUTO REPLY SYSTEM (DMS & PINGS) ---
+        # --- AFK AUTO REPLY SYSTEM (FIXED) ---
+        # Checked BEFORE the auto-mock/react return so it actually triggers
         if message.author.id != self.user.id:
             is_dm = not message.guild
             is_mention = self.user in message.mentions
@@ -353,6 +341,19 @@ class SafeSelfBot(discord.Client):
                     msg = await message.channel.send(afk_msg)
                     asyncio.create_task(self.auto_delete(msg, 300)) # 5 mins
                     self.afk_cooldowns[cooldown_key] = current_time
+
+        # --- AUTO REACT & MOCK ---
+        if str(message.author.id) in self.auto_reacts:
+            for emoji in self.auto_reacts[str(message.author.id)]:
+                try:
+                    await message.add_reaction(emoji)
+                except Exception as e:
+                    print(f"Failed to react: {e}")
+        
+        if str(message.author.id) in self.auto_mocks:
+            safe_text = self.bypass_text(message.content)
+            if safe_text.strip(): 
+                await message.channel.send(safe_text)
 
         # --- STOP PROCESSING COMMANDS IF NOT US ---
         if message.author.id != self.user.id:
@@ -608,11 +609,11 @@ class SafeSelfBot(discord.Client):
                 if not rest_args:
                     return await usage_error("-poll <question>")
                 question = " ".join(rest_args)
-                msg = await message.channel.send(f"> **Poll:** {question}")
+                msg = await message.channel.send(f"# Poll: {question}")
                 await success_delete()
                 await msg.add_reaction("👍")
                 await msg.add_reaction("👎")
-                asyncio.create_task(self.auto_delete(msg, 10))
+                asyncio.create_task(self.auto_delete(msg, 300)) # 5 mins
 
             # --- MODERATION ---
             elif cmd == 'purge':
