@@ -28,13 +28,13 @@ class SafeSelfBot(discord.Client):
         self.token_index = token_index
         self.config = self.load_config()
         self.user_id = None
-        self.auto_reacts = {} # Format: {user_id: [emoji1, emoji2]}
+        self.auto_reacts = {} 
         self.auto_mocks = {} 
         self.cached_users = {} 
         self.processed_messages = set()
         
-        self.sniped_messages = {}
-        self.editsniped_messages = {}
+        self.sniped_messages = {} # Stores up to 5 deleted msgs per channel
+        self.editsniped_messages = {} # Stores up to 5 edited msgs per channel
         self.current_rpc = None
         self.help_message_id = None 
         
@@ -154,7 +154,7 @@ class SafeSelfBot(discord.Client):
             body = (
                 "```ini\n"
                 f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}afk, {prefix}history\n"
-                f"[ MODERATION ] - {prefix}purge, {prefix}dm, {prefix}leaveall\n"
+                f"[ MODERATION ] - {prefix}purge, {prefix}dm, {prefix}snipe\n"
                 f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}hug, {prefix}8ball\n"
                 f"[ INFO ] - {prefix}userinfo, {prefix}snowflake\n"
                 f"[ RPC ] - {prefix}rpc playing, {prefix}rpc image\n"
@@ -279,6 +279,32 @@ class SafeSelfBot(discord.Client):
 
         return f"{header}\n{body}\n{footer}"
 
+    async def on_message_delete(self, message):
+        if message.author.bot:
+            return
+            
+        channel_id = message.channel.id
+        if channel_id not in self.sniped_messages:
+            self.sniped_messages[channel_id] = []
+            
+        # Save up to 5 deleted messages
+        self.sniped_messages[channel_id].insert(0, (message.content, message.author, datetime.datetime.now()))
+        if len(self.sniped_messages[channel_id]) > 5:
+            self.sniped_messages[channel_id].pop()
+
+    async def on_message_edit(self, before, after):
+        if before.author.bot or before.content == after.content:
+            return
+            
+        channel_id = before.channel.id
+        if channel_id not in self.editsniped_messages:
+            self.editsniped_messages[channel_id] = []
+            
+        # Save up to 5 edited messages
+        self.editsniped_messages[channel_id].insert(0, (before.content, after.content, before.author))
+        if len(self.editsniped_messages[channel_id]) > 5:
+            self.editsniped_messages[channel_id].pop()
+
     async def on_message(self, message):
         if message.id in self.processed_messages:
             return
@@ -292,7 +318,7 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AUTO REACT & MOCK (RUNS FOR EVERYONE, INCLUDING YOURSELF) ---
+        # --- AUTO REACT & MOCK (RUNS FOR EVERYONE) ---
         if str(message.author.id) in self.auto_reacts:
             for emoji in self.auto_reacts[str(message.author.id)]:
                 try:
@@ -675,16 +701,19 @@ class SafeSelfBot(discord.Client):
                     pass
 
             elif cmd in ['snipe', 's']:
-                if message.channel.id in self.sniped_messages:
-                    content, author, time = self.sniped_messages[message.channel.id]
+                # Check if there are sniped messages in this channel
+                if message.channel.id in self.sniped_messages and self.sniped_messages[message.channel.id]:
+                    # Grab the most recent one
+                    content, author, time = self.sniped_messages[message.channel.id][0]
                     await message.channel.send(f"> **Sniped:** `{content}`\n> **Author:** `{author.name}`")
                     await success_delete()
                 else:
                     await message.channel.send("> **Nothing to snipe.**")
 
             elif cmd in ['editsnipe', 'es']:
-                if message.channel.id in self.editsniped_messages:
-                    before, after, author = self.editsniped_messages[message.channel.id]
+                # Check if there are edit-sniped messages in this channel
+                if message.channel.id in self.editsniped_messages and self.editsniped_messages[message.channel.id]:
+                    before, after, author = self.editsniped_messages[message.channel.id][0]
                     await message.channel.send(f"> **Before:** `{before}`\n> **After:** `{after}`\n> **Author:** `{author.name}`")
                     await success_delete()
                 else:
