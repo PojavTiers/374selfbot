@@ -146,7 +146,6 @@ class SafeSelfBot(discord.Client):
                 print(f"GIF API Error: {e}")
         return None
 
-    # --- AUTO-DELETE HELPER ---
     async def auto_delete(self, message, delay=5):
         await asyncio.sleep(delay)
         try:
@@ -337,9 +336,12 @@ class SafeSelfBot(discord.Client):
             if safe_text.strip(): 
                 await message.channel.send(safe_text)
 
-        # --- AFK AUTO REPLY SYSTEM (DMS ONLY) ---
-        if message.author.id != self.user.id and not message.guild:
-            if self.afk_reason:
+        # --- AFK AUTO REPLY SYSTEM (DMS & PINGS) ---
+        if message.author.id != self.user.id:
+            is_dm = not message.guild
+            is_mention = self.user in message.mentions
+
+            if self.afk_reason and (is_dm or is_mention):
                 cooldown_key = str(message.author.id)
                 current_time = datetime.datetime.now().timestamp()
                 
@@ -349,7 +351,7 @@ class SafeSelfBot(discord.Client):
                         f"> {self.afk_time}"
                     )
                     msg = await message.channel.send(afk_msg)
-                    asyncio.create_task(self.auto_delete(msg, 5))
+                    asyncio.create_task(self.auto_delete(msg, 300)) # 5 mins
                     self.afk_cooldowns[cooldown_key] = current_time
 
         # --- STOP PROCESSING COMMANDS IF NOT US ---
