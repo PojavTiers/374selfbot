@@ -161,7 +161,7 @@ class SafeSelfBot(discord.Client):
             body = (
                 "```ini\n"
                 f"[ UTILITY ] - {prefix}ping, {prefix}avatar, {prefix}afk, {prefix}history\n"
-                f"[ MODERATION ] - {prefix}purge, {prefix}dm, {prefix}snipe\n"
+                f"[ MODERATION ] - {prefix}purge, {prefix}purgeall, {prefix}dm\n"
                 f"[ FUN ] - {prefix}mock, {prefix}react, {prefix}hug, {prefix}8ball\n"
                 f"[ INFO ] - {prefix}userinfo, {prefix}snowflake\n"
                 f"[ RPC ] - {prefix}rpc playing, {prefix}rpc image\n"
@@ -187,10 +187,11 @@ class SafeSelfBot(discord.Client):
                 {"cmd": f"{prefix}created <@user>", "desc": "When they created account"},
                 {"cmd": f"{prefix}channelinfo", "desc": "Info about current channel"},
                 {"cmd": f"{prefix}invite", "desc": "Get server invite"},
-                {"cmd": f"{prefix}poll <question>", "desc": "Simple 10s text poll"}
+                {"cmd": f"{prefix}poll <question>", "desc": "Simple 5m text poll"}
             ],
             "moderation": [
-                {"cmd": f"{prefix}purge <1-100>", "desc": "Delete your recent messages"},
+                {"cmd": f"{prefix}purge <1-100>", "desc": "Delete your recent messages (Fast)"},
+                {"cmd": f"{prefix}purgeall <1-200>", "desc": "Delete ALL recent messages"},
                 {"cmd": f"{prefix}purgeuser <@user>", "desc": "Delete their recent messages"},
                 {"cmd": f"{prefix}purgebots", "desc": "Delete bot messages"},
                 {"cmd": f"{prefix}purgeimages", "desc": "Delete images"},
@@ -323,8 +324,7 @@ class SafeSelfBot(discord.Client):
 
         self.cached_users[message.author.id] = message.author
 
-        # --- AFK AUTO REPLY SYSTEM (FIXED) ---
-        # Checked BEFORE the auto-mock/react return so it actually triggers
+        # --- AFK AUTO REPLY SYSTEM ---
         if message.author.id != self.user.id:
             is_dm = not message.guild
             is_mention = self.user in message.mentions
@@ -620,73 +620,84 @@ class SafeSelfBot(discord.Client):
                 if not rest_args or not rest_args[0].isdigit():
                     return await usage_error("-purge <amount>")
                 amount = min(int(rest_args[0]), 100) 
-                deleted = 0
+                
+                # FAST PURGE (Parallel tasks)
+                to_delete = []
                 async for msg in message.channel.history(limit=200):
-                    if msg.author.id == self.user.id and deleted < amount:
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                        except Exception:
-                            pass
-                msg = await message.channel.send(f"> **Purged:** `{deleted}` messages")
+                    if msg.author.id == self.user.id and len(to_delete) < amount:
+                        to_delete.append(msg)
+                
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` messages")
+                asyncio.create_task(self.auto_delete(msg, 5))
+
+            elif cmd == 'purgeall':
+                if not rest_args or not rest_args[0].isdigit():
+                    return await usage_error("-purgeall <amount>")
+                amount = min(int(rest_args[0]), 200) 
+                
+                # FAST MASS PURGE (Parallel tasks)
+                to_delete = []
+                async for msg in message.channel.history(limit=200):
+                    if len(to_delete) < amount:
+                        to_delete.append(msg)
+                
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` messages (ALL)")
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'purgeuser':
                 target = await self.resolve_user(message, rest_args[0] if rest_args else None)
                 if not target:
                     return await usage_error("-purgeuser <@user>")
-                deleted = 0
+                amount = min(int(rest_args[1]), 100) if len(rest_args) > 1 and rest_args[1].isdigit() else 50
+                
+                to_delete = []
                 async for msg in message.channel.history(limit=200):
-                    if msg.author.id == target.id and deleted < 50:
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                            await asyncio.sleep(1) 
-                        except Exception:
-                            pass
-                msg = await message.channel.send(f"> **Purged:** `{deleted}` messages from {target.mention}")
+                    if msg.author.id == target.id and len(to_delete) < amount:
+                        to_delete.append(msg)
+                
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` messages from {target.mention}")
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'purgebots':
-                deleted = 0
+                to_delete = []
                 async for msg in message.channel.history(limit=100):
-                    if msg.author.bot and deleted < 50:
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                            await asyncio.sleep(1)
-                        except Exception:
-                            pass
-                msg = await message.channel.send(f"> **Purged:** `{deleted}` bot messages")
+                    if msg.author.bot and len(to_delete) < 50:
+                        to_delete.append(msg)
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` bot messages")
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'purgeimages':
-                deleted = 0
+                to_delete = []
                 async for msg in message.channel.history(limit=100):
-                    if msg.attachments and deleted < 50:
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                            await asyncio.sleep(1)
-                        except Exception:
-                            pass
-                msg = await message.channel.send(f"> **Purged:** `{deleted}` images")
+                    if msg.attachments and len(to_delete) < 50:
+                        to_delete.append(msg)
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` images")
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'purgecontains':
                 if not rest_args:
                     return await usage_error("-purgecontains <text>")
                 text_to_find = " ".join(rest_args).lower()
-                deleted = 0
+                to_delete = []
                 async for msg in message.channel.history(limit=100):
-                    if text_to_find in msg.content.lower() and deleted < 50:
-                        try:
-                            await msg.delete()
-                            deleted += 1
-                            await asyncio.sleep(1)
-                        except Exception:
-                            pass
-                msg = await message.channel.send(f"> **Purged:** `{deleted}` messages containing text")
+                    if text_to_find in msg.content.lower() and len(to_delete) < 50:
+                        to_delete.append(msg)
+                if to_delete:
+                    await asyncio.gather(*[msg.delete() for msg in to_delete], return_exceptions=True)
+                msg = await message.channel.send(f"> **Purged:** `{len(to_delete)}` messages containing text")
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'dm':
