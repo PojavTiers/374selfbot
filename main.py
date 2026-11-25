@@ -190,8 +190,8 @@ class SafeSelfBot(discord.Client):
                 {"cmd": f"{prefix}poll <question>", "desc": "Simple 5m text poll"}
             ],
             "moderation": [
-                {"cmd": f"{prefix}purge <1-100>", "desc": "Delete your recent messages (Fast)"},
-                {"cmd": f"{prefix}purgeall <1-200>", "desc": "Delete ALL recent messages"},
+                {"cmd": f"{prefix}purge <1-100>", "desc": "Delete your recent messages"},
+                {"cmd": f"{prefix}purgeall [1-200]", "desc": "Delete ALL recent messages"},
                 {"cmd": f"{prefix}purgeuser <@user>", "desc": "Delete their recent messages"},
                 {"cmd": f"{prefix}purgebots", "desc": "Delete bot messages"},
                 {"cmd": f"{prefix}purgeimages", "desc": "Delete images"},
@@ -387,6 +387,11 @@ class SafeSelfBot(discord.Client):
                 pass
 
         try:
+            # Alias handling: -purge all -> -purgeall
+            if cmd == 'purge' and rest_args and rest_args[0].lower() == 'all':
+                cmd = 'purgeall'
+                rest_args = rest_args[1:]
+
             if cmd == 'help':
                 if self.help_message_id:
                     try:
@@ -621,7 +626,6 @@ class SafeSelfBot(discord.Client):
                     return await usage_error("-purge <amount>")
                 amount = min(int(rest_args[0]), 100) 
                 
-                # FAST PURGE (Parallel tasks)
                 to_delete = []
                 async for msg in message.channel.history(limit=200):
                     if msg.author.id == self.user.id and len(to_delete) < amount:
@@ -634,11 +638,12 @@ class SafeSelfBot(discord.Client):
                 asyncio.create_task(self.auto_delete(msg, 5))
 
             elif cmd == 'purgeall':
-                if not rest_args or not rest_args[0].isdigit():
-                    return await usage_error("-purgeall <amount>")
-                amount = min(int(rest_args[0]), 200) 
+                # Defaults to 100 if no amount is given
+                if rest_args and rest_args[0].isdigit():
+                    amount = min(int(rest_args[0]), 200)
+                else:
+                    amount = 100
                 
-                # FAST MASS PURGE (Parallel tasks)
                 to_delete = []
                 async for msg in message.channel.history(limit=200):
                     if len(to_delete) < amount:
